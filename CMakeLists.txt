@@ -27,16 +27,6 @@ include_directories(./include/gamepads)
 add_executable(SataTo3DO
 src/main.c
 src/interfaces/USB.c
-src/interfaces/3DO.c
-src/gamepads/vendor_gamepad.c
-src/gamepads/hid_gamepad.c
-src/controllers/8bitdo.c
-src/controllers/xbox360w.c
-src/controllers/dragonrise.c
-src/controllers/wiiadapter.c
-src/controllers/retroBit.c
-src/controllers/saturnAdapter.c
-src/controllers/psClassic.c
 )
 
 # enable usb output, disable uart output
