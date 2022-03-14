@@ -6,7 +6,6 @@
 int main(void)
 {
 	USB_Host_init();
-	_3DO_init();
 	TU_LOG1("Sata to 3DO\r\n");
 
 	while(1) {
