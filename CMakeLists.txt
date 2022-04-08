@@ -24,16 +24,26 @@ include_directories(./include/interfaces)
 include_directories(./include/gamepads)
 
 
-add_executable(SataTo3DO
+
+add_executable(SataTo3DO)
+
+target_sources(SataTo3DO PRIVATE
 src/main.c
 src/interfaces/USB.c
+src/interfaces/3DO.c
 )
+
+pico_generate_pio_header(SataTo3DO ${CMAKE_CURRENT_LIST_DIR}/src/interfaces/read.pio)
 
 # enable usb output, disable uart output
 # pico_enable_stdio_usb(SataTo3DO 1)
-pico_enable_stdio_uart(SataTo3DO 1)
+option(USE_DEBUG "Use the UART RX/TX" ON)
+if (USE_DEBUG)
+	add_definitions(-DUSE_UART_RX=1)
+  pico_enable_stdio_uart(SataTo3DO 1)
+endif()
 
 # create map/bin/hex/uf2 file etc.
 pico_add_extra_outputs(SataTo3DO)
 
-target_link_libraries(SataTo3DO pico_stdlib pico_multicore tinyusb_board tinyusb_host)
+target_link_libraries(SataTo3DO PRIVATE pico_stdlib hardware_pio pico_multicore tinyusb_board tinyusb_host)

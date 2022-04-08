@@ -1,10 +1,7 @@
 #include "USB.h"
 
-#include "bsp/board.h"
-
 void USB_Host_init() {
-    board_init();
-    sleep_ms(500);
+    stdio_init_all();
     tusb_init();
 }
 

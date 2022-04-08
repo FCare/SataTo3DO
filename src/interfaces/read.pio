@@ -1,0 +1,50 @@
+.program read
+
+; Repeatedly get one word of data from the TX FIFO, stalling when the FIFO is
+; empty. Write the least significant bit to the OUT pin group.
+
+; Pin list shall be  CDEN, CDHWR, CDCMD, CDD7, CDD6, CDD5, CDD4, CDD3, CDD2, CDD1, CDD0
+
+
+.define CDHWR 14
+.define RST   15
+.define CDEN  28
+
+public entry_point:
+.wrap_target
+;Need to check for reset and jump to reset loop
+    wait 1 gpio RST
+; Check CDEN is low
+    wait 0 gpio CDEN
+;wait_read:
+    wait 0 gpio CDHWR
+read:
+    in pins, 30
+    ;mov ISR,:: ISR
+    ;push block
+    wait 1 gpio CDHWR
+.wrap
+
+% c-sdk {
+
+#define READ_PIN_COUNT 11
+
+static inline void read_program_init(PIO pio, uint sm, uint offset) {
+    pio_sm_config c = read_program_get_default_config(offset);
+
+    sm_config_set_in_pins(&c, 0);
+    sm_config_set_in_shift(&c, true, true, 30);
+
+    // Set this pin's GPIO function (connect PIO to the pad)
+//    for (int i=0; i<READ_PIN_COUNT; i++) {
+//      pio_gpio_init(pio, pins[i]);
+//      pio_sm_set_consecutive_pindirs(pio, sm, pins[i], 1, false);
+//    }
+
+    // Load our configuration, and jump to the start of the program
+    pio_sm_init(pio, sm, offset, &c);
+    // Set the state machine running
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+%}
