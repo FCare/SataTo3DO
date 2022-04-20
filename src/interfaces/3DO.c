@@ -20,6 +20,7 @@ typedef enum{
   DATA_PATH_CHECK = 0x80,
   READ_ERROR = 0x82,
   READ_ID    = 0x83,
+  READ_DISC_INFO = 0x8B,
 }CD_request_t;
 
 typedef enum{
@@ -29,6 +30,7 @@ typedef enum{
   CHECK = 0x10,
   BUSY_NEW = 0x8,
   DOOR_LOCKED = 0x04,
+  DOUBLE_SPEED = 0x02,
   DISK_OK = 0x01
 }CD_status_t;
 
@@ -84,7 +86,7 @@ void set3doDriveReady(bool on) {
 
 void set3doDriveMounted(bool on) {
   if (on) {
-    status |= CADDY_IN | SPINNING;
+    status |= DOOR_CLOSED| CADDY_IN | SPINNING;
   } else {
     status &= ~CADDY_IN & ~SPINNING;
   }
@@ -190,7 +192,18 @@ void handleCommand(uint32_t data) {
       gpio_put(CDSTEN, 0x1);
       pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
       break;
-
+    case READ_DISC_INFO:
+      for (int i=0; i<6; i++) {
+        data_in[i] = get3doData();
+      }
+      printf("READ_DISC_INFO\n");
+      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
+      gpio_put(CDSTEN, 0x0);
+      set3doData(READ_DISC_INFO);
+      set3doData(status); //status 0x80
+      gpio_put(CDSTEN, 0x1);
+      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
+      break;
     default: printf("unknown Cmd %x\n", request);
   }
 }
