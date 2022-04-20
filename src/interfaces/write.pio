@@ -1,0 +1,32 @@
+.program write
+
+; Repeatedly get one word of data from the TX FIFO, stalling when the FIFO is
+; empty. Write the least significant bit to the OUT pin group.
+
+; Pin list shall be  CDEN, CDHWR, CDCMD, CDD7, CDD6, CDD5, CDD4, CDD3, CDD2, CDD1, CDD0
+
+
+.define CDHRD 13
+
+public entry_point:
+.wrap_target
+    wait 0 gpio CDHRD ;wait for request to read
+    out pins,32 ;output data
+    wait 1 gpio CDHRD ;wait for end of request
+    push block
+.wrap
+
+% c-sdk {
+
+static inline void write_program_init(PIO pio, uint sm, uint offset) {
+    pio_sm_config c = write_program_get_default_config(offset);
+
+    sm_config_set_out_pins(&c, 0, 32);
+    sm_config_set_out_shift(&c, true, true, 32);
+
+    // Load our configuration, and jump to the start of the program
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+%}

@@ -24,6 +24,7 @@
 
 #define EJECT_3V 29
 
+//Input or output
 #define CDD0    DATA_0
 #define CDD1    DATA_1
 #define CDD2    DATA_2
@@ -51,7 +52,7 @@
 
 #define DATA_MASK ((1<<CDD0)|(1<<CDD1)|(1<<CDD2)|(1<<CDD3)|(1<<CDD4)|(1<<CDD5)|(1<<CDD6)|(1<<CDD7))
 #define CTRL_MASK ((1<<EJECT)|(1<<CDEN)|(1<<CDRST)|(1<<CDHRD)|(1<<CDHWR)|(1<<CDCMD))
-#define OUTPUT_MASK ((1<<CDSTEN)|(1<<CDDTEN)|(1<<CDWAIT)|(1<<CDMDCHG))
+#define OUTPUT_MASK ((1<<CDSTEN)|(1<<CDDTEN)|(1<<CDWAIT))
 
 #ifndef USE_UART_RX
 #define OUTPUT_MASK (OUTPUT_MASK | (1<<LED))

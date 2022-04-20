@@ -34,6 +34,7 @@ src/interfaces/3DO.c
 )
 
 pico_generate_pio_header(SataTo3DO ${CMAKE_CURRENT_LIST_DIR}/src/interfaces/read.pio)
+pico_generate_pio_header(SataTo3DO ${CMAKE_CURRENT_LIST_DIR}/src/interfaces/write.pio)
 
 # enable usb output, disable uart output
 # pico_enable_stdio_usb(SataTo3DO 1)

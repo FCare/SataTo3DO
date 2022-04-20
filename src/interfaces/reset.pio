@@ -1,0 +1,46 @@
+.program reset
+
+; Repeatedly get one word of data from the TX FIFO, stalling when the FIFO is
+; empty. Write the least significant bit to the OUT pin group.
+
+; Pin list shall be  CDEN, CDHWR, CDCMD, CDD7, CDD6, CDD5, CDD4, CDD3, CDD2, CDD1, CDD0
+
+
+.define CDMDCHG 26
+.define CDRST   15
+
+public entry_point:
+.wrap_target
+;Need to check for reset and jump to reset loop
+    set pins,0x1
+    jmp pin out_of_reset
+    wait 1 gpio CDRST [30]
+    nop [30]
+    nop [30]
+    nop [30]
+    set pins,0 [20]
+    set pins,1 [15]
+out_of_reset:
+    set pins,0
+    wait 0 gpio CDRST
+.wrap
+
+% c-sdk {
+
+#include "hardware/clocks.h"
+
+static inline void reset_program_init(PIO pio, uint sm, uint offset) {
+    pio_sm_config c = reset_program_get_default_config(offset);
+
+    sm_config_set_set_pins(&c, CDMDCHG, 1);
+    sm_config_set_jmp_pin(&c, CDRST);
+    pio_sm_set_consecutive_pindirs(pio, sm, CDMDCHG, 1, true);
+    pio_sm_set_pins(pio, sm, 0x1<<CDMDCHG);
+
+    sm_config_set_clkdiv_int_frac(&c, 0xFFFF, 0x00);
+
+    // Load our configuration, and jump to the start of the program
+    pio_sm_init(pio, sm, offset, &c);
+}
+
+%}

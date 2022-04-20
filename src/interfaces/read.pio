@@ -12,16 +12,8 @@
 
 public entry_point:
 .wrap_target
-;Need to check for reset and jump to reset loop
-    wait 1 gpio RST
-; Check CDEN is low
-    wait 0 gpio CDEN
-;wait_read:
     wait 0 gpio CDHWR
-read:
-    in pins, 30
-    ;mov ISR,:: ISR
-    ;push block
+    in pins, 32
     wait 1 gpio CDHWR
 .wrap
 
@@ -29,21 +21,20 @@ read:
 
 #define READ_PIN_COUNT 11
 
+static inline void read_program_init_pin(PIO pio, uint sm, bool active) {
+}
+
 static inline void read_program_init(PIO pio, uint sm, uint offset) {
     pio_sm_config c = read_program_get_default_config(offset);
 
     sm_config_set_in_pins(&c, 0);
-    sm_config_set_in_shift(&c, true, true, 30);
+    sm_config_set_in_shift(&c, true, true, 32);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
 
-    // Set this pin's GPIO function (connect PIO to the pad)
-//    for (int i=0; i<READ_PIN_COUNT; i++) {
-//      pio_gpio_init(pio, pins[i]);
-//      pio_sm_set_consecutive_pindirs(pio, sm, pins[i], 1, false);
-//    }
+    pio_sm_set_pindirs_with_mask(pio, sm, 0x0, 0xFF<<CDD0);
 
     // Load our configuration, and jump to the start of the program
     pio_sm_init(pio, sm, offset, &c);
-    // Set the state machine running
     pio_sm_set_enabled(pio, sm, true);
 }
 
