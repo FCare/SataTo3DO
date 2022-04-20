@@ -59,5 +59,7 @@
 #endif
 
 extern void _3DO_init();
+extern void set3doDriveReady(bool on);
+extern void set3doDriveMounted(bool on);
 
 #endif

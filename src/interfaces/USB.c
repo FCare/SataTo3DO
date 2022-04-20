@@ -1,4 +1,6 @@
 #include "USB.h"
+#include "3DO.h"
+#include "pico/stdio.h"
 
 void USB_Host_init() {
     stdio_init_all();
@@ -38,9 +40,11 @@ bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const
   if (csw->status != 0)
   {
     printf("Inquiry failed\r\n");
+    //Quel status pour la 3DO?
     return false;
   }
 
+  set3doDriveMounted(true);
   // Print out Vendor ID, Product ID and Rev
   printf("%.8s %.16s rev %.4s Type 0x%x\r\n", inquiry_resp.vendor_id, inquiry_resp.product_id, inquiry_resp.product_rev, inquiry_resp.peripheral_device_type);
 
@@ -63,6 +67,7 @@ void tuh_msc_mount_cb(uint8_t dev_addr)
   uint8_t const lun = 0;
   printf("A USB MassStorage device is mounted\r\n");
   inquiry_cb_flag = false;
+  set3doDriveReady(true);
   tuh_msc_inquiry(dev_addr, lun, &inquiry_resp, inquiry_complete_cb);
 }
 
@@ -70,6 +75,8 @@ void tuh_msc_umount_cb(uint8_t dev_addr)
 {
   (void) dev_addr;
   printf("A USB MassStorage device is unmounted\r\n");
+  set3doDriveReady(false);
+  set3doDriveMounted(false);
 }
 
 #endif

@@ -7,6 +7,8 @@ set(PICO_TINYUSB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tinyusb")
 
 set(PICO_BOARD waveshare_rp2040_zero)
 
+set(PICO_STACK_SIZE _u(0x1000))
+
 include(${PICO_TINYUSB_PATH}/hw/bsp/${FAMILY}/family.cmake)
 
 set(CFG_TUSB_CONFIG_FILE "include/tusb_config.h")

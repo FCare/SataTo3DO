@@ -16,12 +16,54 @@
 #endif
 
 typedef enum{
+  SPIN_UP = 0x2,
+  DATA_PATH_CHECK = 0x80,
   READ_ERROR = 0x82,
   READ_ID    = 0x83,
 }CD_request_t;
 
+typedef enum{
+  DOOR_CLOSED =	0x80,
+  CADDY_IN = 0x40,
+  SPINNING = 0x20,
+  CHECK = 0x10,
+  BUSY_NEW = 0x8,
+  DOOR_LOCKED = 0x04,
+  DISK_OK = 0x01
+}CD_status_t;
+
+typedef enum{
+  NO_ERROR = 0x0,
+  SOFT_READ_RETRY = 0x1,
+  SOFT_READ_CORRECTION = 0x2,
+  NOT_READY = 0x3,
+  NO_TOC = 0x4,
+  HARD_READ = 0x5,
+  SEEK_FAIL = 0x6,
+  TRACKING_FAIL = 0x7,
+  DRIVE_RAM_ERROR = 0x8,
+  SELF_TEST_ERROR = 0x9,
+  FOCUSING_FAIL = 0xA,
+  SPINDLE_FAIL = 0xB,
+  DATA_PATH_FAIL = 0xC,
+  ILLEGAL_LBA = 0xD,
+  ILLEGAL_CDB = 0xE,
+  END_USER_TRACK = 0xF,
+  ILLEGAL_MODE = 0x10,
+  MEDIA_CHANGED = 0x11,
+  POWER_OR_RESET_OCCURED = 0x12,
+  DRIVE_ROM_FAIL = 0x13,
+  ILLEGAL_CMD = 0x14,
+  DISC_REMOVED = 0x15,
+  HARDWARE_ERROR = 0x16,
+  ILLEGAL_REQUEST = 0x17,
+}CD_error_t;
+
 uint sm_read = -1;
 uint sm_write = -1;
+
+uint8_t errorCode = POWER_OR_RESET_OCCURED;
+uint8_t status = 0x0; //DOOR_CLOSED;
 
 void wait_out_of_reset() {
   while( !gpio_get(CDRST)) {
@@ -33,6 +75,19 @@ void wait_out_of_reset() {
   gpio_put(CDMDCHG, 1); //Under reset
   sleep_ms(6);
   gpio_put(CDMDCHG, 0); //Under reset
+}
+
+void set3doDriveReady(bool on) {
+  if (on) status |= DISK_OK;
+  else status &= ~DISK_OK;
+}
+
+void set3doDriveMounted(bool on) {
+  if (on) {
+    status |= CADDY_IN | SPINNING;
+  } else {
+    status &= ~CADDY_IN & ~SPINNING;
+  }
 }
 
 uint32_t get3doData() {
@@ -58,12 +113,6 @@ void set3doData(uint32_t data) {
 #endif
 }
 
-void outSync() {
-#ifndef NO_WRITE_PIO
-  while(!pio_sm_is_tx_fifo_empty (pio0, sm_write));
-#endif
-}
-
 void handleCommand(uint32_t data) {
   CD_request_t request = (CD_request_t) (data>>CDD0)&0xFF;
   bool isCmd = (data>>CDCMD)&0x1 == 0x0;
@@ -73,11 +122,9 @@ void handleCommand(uint32_t data) {
     for (int i=0; i<6; i++) {
       data_in[i] = get3doData();
     }
-      printf("Got All packets\n");
-      gpio_set_dir_masked(0xFF<<CDD0, 0xFF<<CDD0);
+      printf("READ ID\n");
       pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
       gpio_put(CDSTEN, 0x0);
-      // pio_restart_sm_mask(pio0, 1<< sm_write);
       set3doData(READ_ID);
       set3doData(0x00); //manufacture Id
       set3doData(0x10);
@@ -89,12 +136,9 @@ void handleCommand(uint32_t data) {
       set3doData(0x00);
       set3doData(0x00); //flag
       set3doData(0x00);
-      set3doData(0x0B); //status
-
-      // set_3D0_interface_write(false);
-      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
-      // gpio_set_dir_masked(0xFF<<CDD0, 0x0);
+      set3doData(status); //status 0xB
       gpio_put(CDSTEN, 0x1);
+      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
 
       // set_3D0_interface_read(true);
       printf("All done\n");
@@ -102,9 +146,51 @@ void handleCommand(uint32_t data) {
     case READ_ERROR:
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
-        printf("La %x\n", (data_in[i]>>CDD0) & 0xFF);
       }
+      printf("READ ERROR\n");
+      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
+      gpio_put(CDSTEN, 0x0);
+      set3doData(READ_ERROR);
+      set3doData(0x00);
+      set3doData(0x00);
+      set3doData(errorCode); //error code
+      set3doData(0x00);
+      set3doData(0x00);
+      set3doData(0x00);
+      set3doData(0x00);
+      set3doData(0x00);
+      set3doData(status); //status 0x80
+      gpio_put(CDSTEN, 0x1);
+      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
+      errorCode = NO_ERROR;
       break;
+    case DATA_PATH_CHECK:
+      for (int i=0; i<6; i++) {
+        data_in[i] = get3doData();
+      }
+      printf("DATA_PATH_CHECK\n");
+      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
+      gpio_put(CDSTEN, 0x0);
+      set3doData(DATA_PATH_CHECK);
+      set3doData(0xAA);
+      set3doData(0x55);
+      set3doData(status); //status 0x80
+      gpio_put(CDSTEN, 0x1);
+      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
+      break;
+    case SPIN_UP:
+      for (int i=0; i<6; i++) {
+        data_in[i] = get3doData();
+      }
+      printf("SPIN UP\n");
+      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
+      gpio_put(CDSTEN, 0x0);
+      set3doData(SPIN_UP);
+      set3doData(status); //status 0x80
+      gpio_put(CDSTEN, 0x1);
+      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
+      break;
+
     default: printf("unknown Cmd %x\n", request);
   }
 }
@@ -179,7 +265,7 @@ void _3DO_init() {
   gpio_init(CDHWR);
   gpio_set_dir(CDHWR, false);
 
-  gpio_set_dir_masked(0xFF<<CDD0, 0x0);
+  gpio_set_dir_masked(0xFF<<CDD0, 0xFF<<CDD0);
   gpio_init_mask(0xFF<<CDD0);
 
 #ifndef NO_READ_PIO
