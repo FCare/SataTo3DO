@@ -70,7 +70,7 @@ uint sm_read = -1;
 uint sm_write = -1;
 
 uint8_t errorCode = POWER_OR_RESET_OCCURED;
-uint8_t status = 0x0;
+uint8_t status = DOOR_CLOSED;
 
 void wait_out_of_reset() {
   while( !gpio_get(CDRST)) {
@@ -216,7 +216,6 @@ void handleCommand(uint32_t data) {
         set3doData(currentDisc.msf[0]);
       } else {
         errorCode = NOT_READY;
-        set3doData(0x0);
         set3doData(0x0);
         set3doData(0x0);
         set3doData(0x0);

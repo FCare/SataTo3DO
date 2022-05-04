@@ -65,6 +65,7 @@ static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw
   currentDisc.format = 0x0; /*00 CD-DA or CD-ROM / 10 CD-I / 20 XA */
   //Assume type is CD-DA or CD-ROM always
   currentDisc.mounted = true;
+  set3doCDReady(true);
 }
 
 
@@ -78,8 +79,6 @@ bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const
     return false;
   }
 
-  set3doCDReady(true);
-  set3doDriveMounted(true);
   // Print out Vendor ID, Product ID and Rev
   printf("%.8s %.16s rev %.4s Type 0x%x\r\n", inquiry_resp.vendor_id, inquiry_resp.product_id, inquiry_resp.product_rev, inquiry_resp.peripheral_device_type);
 
@@ -114,6 +113,7 @@ void tuh_msc_mount_cb(uint8_t dev_addr)
   printf("A USB MassStorage device is mounted\r\n");
   inquiry_cb_flag = false;
   tuh_msc_inquiry(dev_addr, lun, &inquiry_resp, inquiry_complete_cb);
+  set3doDriveMounted(true);
 }
 
 void tuh_msc_umount_cb(uint8_t dev_addr)
