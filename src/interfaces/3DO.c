@@ -15,19 +15,24 @@
 #include "write.pio.h"
 #endif
 
+extern cd_s currentDisc;
+
 typedef enum{
   SPIN_UP = 0x2,
   DATA_PATH_CHECK = 0x80,
   READ_ERROR = 0x82,
   READ_ID    = 0x83,
+  READ_CAPACITY = 0x85,
   READ_DISC_INFO = 0x8B,
+  READ_TOC = 0x8C,
+  READ_SESSION = 0x8D,
 }CD_request_t;
 
 typedef enum{
   DOOR_CLOSED =	0x80,
   CADDY_IN = 0x40,
   SPINNING = 0x20,
-  CHECK = 0x10,
+  CHECK_ERROR = 0x10,
   BUSY_NEW = 0x8,
   DOOR_LOCKED = 0x04,
   DOUBLE_SPEED = 0x02,
@@ -65,7 +70,7 @@ uint sm_read = -1;
 uint sm_write = -1;
 
 uint8_t errorCode = POWER_OR_RESET_OCCURED;
-uint8_t status = 0x0; //DOOR_CLOSED;
+uint8_t status = 0x0;
 
 void wait_out_of_reset() {
   while( !gpio_get(CDRST)) {
@@ -79,17 +84,21 @@ void wait_out_of_reset() {
   gpio_put(CDMDCHG, 0); //Under reset
 }
 
-void set3doDriveReady(bool on) {
+void set3doCDReady(bool on) {
   if (on) status |= DISK_OK;
   else status &= ~DISK_OK;
 }
 
 void set3doDriveMounted(bool on) {
   if (on) {
-    status |= DOOR_CLOSED| CADDY_IN | SPINNING;
+    status |= CADDY_IN | SPINNING;
   } else {
     status &= ~CADDY_IN & ~SPINNING;
   }
+}
+
+void set3doDriveReady() {
+  status |= DOOR_CLOSED; //Stat drive is always close on start
 }
 
 uint32_t get3doData() {
@@ -115,6 +124,18 @@ void set3doData(uint32_t data) {
 #endif
 }
 
+void initiateResponse(CD_request_t request) {
+  pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
+  gpio_put(CDSTEN, 0x0);
+  set3doData(request);
+}
+
+void closeRequestwithStatus() {
+  set3doData(status);
+  gpio_put(CDSTEN, 0x1);
+  pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
+}
+
 void handleCommand(uint32_t data) {
   CD_request_t request = (CD_request_t) (data>>CDD0)&0xFF;
   bool isCmd = (data>>CDCMD)&0x1 == 0x0;
@@ -125,34 +146,25 @@ void handleCommand(uint32_t data) {
       data_in[i] = get3doData();
     }
       printf("READ ID\n");
-      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
-      gpio_put(CDSTEN, 0x0);
-      set3doData(READ_ID);
+      initiateResponse(READ_ID);
       set3doData(0x00); //manufacture Id
       set3doData(0x10);
       set3doData(0x00); //manufacture number
       set3doData(0x01);
-      set3doData(0x00);
-      set3doData(0x00);
+      set3doData(0x30);
+      set3doData(0x75);
       set3doData(0x00); //revision number
       set3doData(0x00);
       set3doData(0x00); //flag
       set3doData(0x00);
-      set3doData(status); //status 0xB
-      gpio_put(CDSTEN, 0x1);
-      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
-
-      // set_3D0_interface_read(true);
-      printf("All done\n");
+      closeRequestwithStatus();
       break;
     case READ_ERROR:
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
       }
       printf("READ ERROR\n");
-      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
-      gpio_put(CDSTEN, 0x0);
-      set3doData(READ_ERROR);
+      initiateResponse(READ_ERROR);
       set3doData(0x00);
       set3doData(0x00);
       set3doData(errorCode); //error code
@@ -161,48 +173,111 @@ void handleCommand(uint32_t data) {
       set3doData(0x00);
       set3doData(0x00);
       set3doData(0x00);
-      set3doData(status); //status 0x80
-      gpio_put(CDSTEN, 0x1);
-      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
+      status &= ~CHECK_ERROR;
       errorCode = NO_ERROR;
+      closeRequestwithStatus();
+      printf("Status is %x\n", status);
       break;
     case DATA_PATH_CHECK:
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
       }
       printf("DATA_PATH_CHECK\n");
-      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
-      gpio_put(CDSTEN, 0x0);
-      set3doData(DATA_PATH_CHECK);
-      set3doData(0xAA);
-      set3doData(0x55);
-      set3doData(status); //status 0x80
-      gpio_put(CDSTEN, 0x1);
-      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
+      initiateResponse(DATA_PATH_CHECK);
+      set3doData(0xAA); //This means ok
+      set3doData(0x55); //This means ok. Not the case when no disc
+      closeRequestwithStatus();
       break;
     case SPIN_UP:
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
       }
       printf("SPIN UP\n");
-      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
-      gpio_put(CDSTEN, 0x0);
-      set3doData(SPIN_UP);
-      set3doData(status); //status 0x80
-      gpio_put(CDSTEN, 0x1);
-      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
+      initiateResponse(SPIN_UP);
+      if (!(status & DISK_OK)) {
+        status |= CHECK_ERROR;
+        errorCode |= DISC_REMOVED;
+      }
+      closeRequestwithStatus();
       break;
     case READ_DISC_INFO:
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
       }
       printf("READ_DISC_INFO\n");
-      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
-      gpio_put(CDSTEN, 0x0);
-      set3doData(READ_DISC_INFO);
-      set3doData(status); //status 0x80
-      gpio_put(CDSTEN, 0x1);
-      pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
+      initiateResponse(READ_DISC_INFO);
+      // LBA = (((M*60)+S)*75+F)-150
+      if (currentDisc.mounted) {
+        set3doData(currentDisc.format);
+        set3doData(currentDisc.first_track);
+        set3doData(currentDisc.last_track);
+        set3doData(currentDisc.msf[2]);
+        set3doData(currentDisc.msf[1]);
+        set3doData(currentDisc.msf[0]);
+      } else {
+        errorCode = NOT_READY;
+        set3doData(0x0);
+        set3doData(0x0);
+        set3doData(0x0);
+        set3doData(0x0);
+        set3doData(0x0);
+        set3doData(0x0);
+        set3doData(0x0);
+      }
+      closeRequestwithStatus();
+      break;
+    case READ_TOC:
+      for (int i=0; i<6; i++) {
+        data_in[i] = get3doData();
+      }
+      printf("READ_TOC %x\n", (data_in[2]>>CDD0)&0xFF);
+      initiateResponse(READ_TOC);
+      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].CTRL);
+      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].id);
+      set3doData(0x0);
+      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].msf[2]);
+      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].msf[1]);
+      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].msf[0]);
+      set3doData(0x0);
+      set3doData(0x0);
+      closeRequestwithStatus();
+      break;
+    case READ_SESSION:
+      for (int i=0; i<6; i++) {
+        data_in[i] = get3doData();
+      }
+      printf("READ_SESSION\n");
+      initiateResponse(READ_SESSION);
+      if (currentDisc.multiSession) {
+        //TBD with a multisession disc
+        set3doData(0x80);
+        set3doData(currentDisc.msf[2]); //might some other values like msf for multisession start
+        set3doData(currentDisc.msf[1]);
+        set3doData(currentDisc.msf[0]);
+        set3doData(0x0);
+        set3doData(0x0);
+      } else {
+        set3doData(0x0);
+        set3doData(0x0);
+        set3doData(0x0);
+        set3doData(0x0);
+        set3doData(0x0);
+        set3doData(0x0);
+      }
+      closeRequestwithStatus();
+    break;
+    case READ_CAPACITY:
+      for (int i=0; i<6; i++) {
+        data_in[i] = get3doData();
+      }
+      printf("READ_CAPACITY\n");
+      initiateResponse(READ_CAPACITY);
+      set3doData(currentDisc.msf[2]);
+      set3doData(currentDisc.msf[1]);
+      set3doData(currentDisc.msf[0]);
+      set3doData(0x0);
+      set3doData(0x0);
+      closeRequestwithStatus();
       break;
     default: printf("unknown Cmd %x\n", request);
   }

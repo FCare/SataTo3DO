@@ -58,8 +58,29 @@
 #define OUTPUT_MASK (OUTPUT_MASK | (1<<LED))
 #endif
 
+typedef struct {
+  uint8_t id;
+  uint8_t ADR;
+  uint8_t CTRL;
+  uint8_t msf[3];
+} track_s;
+
+typedef struct {
+  bool mounted;
+  bool multiSession;
+  uint8_t first_track;
+  uint8_t last_track;
+  uint8_t format;
+  uint8_t nb_track;
+  uint8_t msf[3];
+  uint32_t nb_block;
+  uint16_t block_size;
+  track_s tracks[100];
+} cd_s;
+
 extern void _3DO_init();
-extern void set3doDriveReady(bool on);
+extern void set3doCDReady(bool on);
 extern void set3doDriveMounted(bool on);
+extern void set3doDriveReady();
 
 #endif
