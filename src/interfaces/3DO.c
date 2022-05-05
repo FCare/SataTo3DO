@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "pico/stdlib.h"
 #include "hardware/clocks.h"
 #include "hardware/gpio.h"
@@ -15,10 +16,15 @@
 #include "write.pio.h"
 #endif
 
+extern bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer, volatile bool *ready);
+
+#define GET_BUS(A) (((A)>>CDD0)&0xFF)
+
 extern cd_s currentDisc;
 
 typedef enum{
   SPIN_UP = 0x2,
+  READ_DATA = 0x10,
   DATA_PATH_CHECK = 0x80,
   READ_ERROR = 0x82,
   READ_ID    = 0x83,
@@ -124,6 +130,18 @@ void set3doData(uint32_t data) {
 #endif
 }
 
+volatile bool block_ready = false;
+
+
+void initiateData(void) {
+  pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
+  gpio_put(CDDTEN, 0x0);
+}
+
+void closeData(void) {
+  gpio_put(CDDTEN, 0x1);
+}
+
 void initiateResponse(CD_request_t request) {
   pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
   gpio_put(CDSTEN, 0x0);
@@ -136,8 +154,39 @@ void closeRequestwithStatus() {
   pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
 }
 
+void sendData(int startlba, int nb_block) {
+  uint8_t *buffer[2];
+  buffer[0] = malloc(currentDisc.block_size);
+  buffer[1] = malloc(currentDisc.block_size);
+
+  if (nb_block == 0) return;
+
+  readBlock(startlba, 1, buffer[nb_block%2], &block_ready);
+  while (nb_block != 0) {
+    int idBuffer = nb_block%2;
+    nb_block--;
+    startlba++;
+    while (block_ready == false) ;
+    block_ready = false;
+    if (nb_block > 0) readBlock(startlba, 1, buffer[nb_block%2], &block_ready);
+    initiateData();
+    printf("Blco Size %d\n", currentDisc.block_size);
+    for (int i = 0; i<currentDisc.block_size; i++) {
+      // printf("Data 0x%x\n", buffer[idBuffer][i]);
+      if (i == 100) gpio_put(CDSTEN, 0x0);
+      set3doData(buffer[idBuffer][i]);
+    }
+    closeData();
+  }
+  set3doData(READ_DATA);
+  closeRequestwithStatus();
+
+  free(buffer[0]);
+  free(buffer[1]);
+}
+
 void handleCommand(uint32_t data) {
-  CD_request_t request = (CD_request_t) (data>>CDD0)&0xFF;
+  CD_request_t request = (CD_request_t) GET_BUS(data);
   bool isCmd = (data>>CDCMD)&0x1 == 0x0;
   uint32_t data_in[6];
   switch(request) {
@@ -197,8 +246,26 @@ void handleCommand(uint32_t data) {
       if (!(status & DISK_OK)) {
         status |= CHECK_ERROR;
         errorCode |= DISC_REMOVED;
+      } else {
+        status |= SPINNING;
       }
       closeRequestwithStatus();
+      break;
+    case READ_DATA:
+      for (int i=0; i<6; i++) {
+        data_in[i] = GET_BUS(get3doData());
+      }
+      printf("READ DATA\n");
+      if (data_in[3] == 0x00) {
+        //MSF
+        int lba = data_in[0]*60*75+data_in[1]*75+data_in[2] - 150;
+        int nb_block = (data_in[4]<<8)|data_in[5];
+        printf("From block 0%x to 0x%x\n", lba, lba+nb_block);
+        sendData(lba, nb_block);
+      } else {
+        //LBA not supported yet
+        printf("LBA not supported yet\n");
+      }
       break;
     case READ_DISC_INFO:
       for (int i=0; i<6; i++) {
@@ -227,17 +294,17 @@ void handleCommand(uint32_t data) {
       break;
     case READ_TOC:
       for (int i=0; i<6; i++) {
-        data_in[i] = get3doData();
+        data_in[i] = GET_BUS(get3doData());
       }
-      printf("READ_TOC %x\n", (data_in[2]>>CDD0)&0xFF);
+      printf("READ_TOC %x\n", data_in[2]);
       initiateResponse(READ_TOC);
       set3doData(0x0); //NixByte?
-      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].CTRL_ADR); //ADDR
-      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].id); //ENT_NUMBER
+      set3doData(currentDisc.tracks[data_in[2]].CTRL_ADR); //ADDR
+      set3doData(currentDisc.tracks[data_in[2]].id); //ENT_NUMBER
       set3doData(0x0);//Format
-      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].msf[0]);
-      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].msf[1]);
-      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].msf[2]);
+      set3doData(currentDisc.tracks[data_in[2]].msf[0]);
+      set3doData(currentDisc.tracks[data_in[2]].msf[1]);
+      set3doData(currentDisc.tracks[data_in[2]].msf[2]);
       set3doData(0x0);
       closeRequestwithStatus();
       break;

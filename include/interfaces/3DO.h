@@ -74,6 +74,8 @@ typedef struct {
   uint8_t msf[3];
   uint32_t nb_block;
   uint16_t block_size;
+  uint8_t dev_addr;
+  uint8_t lun;
   track_s tracks[100];
 } cd_s;
 

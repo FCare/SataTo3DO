@@ -28,23 +28,25 @@ uint8_t readBuffer[20480];
 
 cd_s currentDisc = {0};
 
+static volatile bool *read_done;
+
 static bool read10_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
-  printf("Read ok (%d):", cbw->total_bytes);
-  for (int i = 0; i < cbw->total_bytes; i++) {
-    printf("0x%x ", readBuffer[i]);
-  }
-  printf("\n");
+  *read_done = true;
+  return true;
 }
 
+bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer, volatile bool *ready) {
+  read_done = ready;
+  *read_done = false;
+  for (int i=0; i<10; i++) readBuffer[200+i] = i;
+  if ( !tuh_msc_read10(currentDisc.dev_addr, currentDisc.lun, buffer, start, nb_block, read10_complete_cb)) {
+    printf("Got error with block read\n");
+    return false;
+  }
+  return true;
+}
 static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
-  currentDisc.nb_track = (((readBuffer[0]<<8)+readBuffer[1]) - 2)/8;
-
-  currentDisc.first_track = readBuffer[2];
-  currentDisc.last_track = readBuffer[3];
-
-  printf("First %d, last %d\n", currentDisc.first_track, currentDisc.last_track);
-
-  for (int i = 0; i < currentDisc.nb_track; i++) {
+  for (int i = 0; i < currentDisc.nb_track-1; i++) {
     int index = 4+8*i;
     //OxAA as id mean lead out
     currentDisc.tracks[i].id = readBuffer[index + 2];
@@ -57,6 +59,26 @@ static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw
   currentDisc.mounted = true;
   set3doCDReady(true);
   set3doDriveMounted(true);
+  return true;
+}
+
+static bool read_toc_light_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
+  currentDisc.nb_track = (((readBuffer[0]<<8)+readBuffer[1]) - 2)/8;
+
+  currentDisc.first_track = readBuffer[2];
+  currentDisc.last_track = readBuffer[3];
+
+  printf("First %d, last %d\n", currentDisc.first_track, currentDisc.last_track);
+
+  if (currentDisc.nb_track > 2) {
+    if (!tuh_msc_read_toc(dev_addr, cbw->lun, readBuffer, 1, 0, currentDisc.nb_track, read_toc_complete_cb)) {
+        printf("Got error with toc read\n");
+        return false;
+    }
+  } else {
+    return read_toc_complete_cb(dev_addr, cbw, csw);
+  }
+  return true;
 }
 
 
@@ -71,11 +93,13 @@ bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const
   }
 
   // Print out Vendor ID, Product ID and Rev
-  printf("%.8s %.16s rev %.4s Type 0x%x\r\n", inquiry_resp.vendor_id, inquiry_resp.product_id, inquiry_resp.product_rev, inquiry_resp.peripheral_device_type);
+  printf("%.8s %.16s rev %.4s Type 0x%x Lun %d\r\n", inquiry_resp.vendor_id, inquiry_resp.product_id, inquiry_resp.product_rev, inquiry_resp.peripheral_device_type, cbw->lun);
 
   // Get capacity of device
   currentDisc.nb_block = tuh_msc_get_block_count(dev_addr, cbw->lun);
   currentDisc.block_size = tuh_msc_get_block_size(dev_addr, cbw->lun);
+  currentDisc.dev_addr = dev_addr;
+  currentDisc.lun = cbw->lun;
 
   int lba = currentDisc.nb_block + 150;
   currentDisc.msf[0] = lba/(60*75);
@@ -90,14 +114,10 @@ bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const
   printf("Block Count = %lu, Block Size: %lu\r\n", currentDisc.nb_block, currentDisc.block_size);
   printf("Disc duration is %2d:%2d:%2d\n", currentDisc.msf[0], currentDisc.msf[1], currentDisc.msf[2]);
 
-  if (!tuh_msc_read_toc(dev_addr, cbw->lun, readBuffer, 1, 0, 0, read_toc_complete_cb)) {
+  if (!tuh_msc_read_toc(dev_addr, cbw->lun, readBuffer, 1, 0, 2, read_toc_light_complete_cb)) {
       printf("Got error with toc read\n");
       return false;
   }
-    // if ( !tuh_msc_read10(dev_addr, cbw->lun, readBuffer, 10, 10, read10_complete_cb)) {
-  	//   printf("Got error with block read\n");
-    //   return false;
-  	// }
   return true;
 }
 
