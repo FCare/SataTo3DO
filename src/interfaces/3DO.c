@@ -231,13 +231,13 @@ void handleCommand(uint32_t data) {
       }
       printf("READ_TOC %x\n", (data_in[2]>>CDD0)&0xFF);
       initiateResponse(READ_TOC);
-      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].CTRL);
-      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].id);
-      set3doData(0x0);
-      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].msf[2]);
-      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].msf[1]);
+      set3doData(0x0); //NixByte?
+      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].CTRL_ADR); //ADDR
+      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].id); //ENT_NUMBER
+      set3doData(0x0);//Format
       set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].msf[0]);
-      set3doData(0x0);
+      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].msf[1]);
+      set3doData(currentDisc.tracks[(data_in[2]>>CDD0)&0xFF].msf[2]);
       set3doData(0x0);
       closeRequestwithStatus();
       break;

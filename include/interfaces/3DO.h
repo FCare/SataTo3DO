@@ -60,8 +60,7 @@
 
 typedef struct {
   uint8_t id;
-  uint8_t ADR;
-  uint8_t CTRL;
+  uint8_t CTRL_ADR;
   uint8_t msf[3];
 } track_s;
 

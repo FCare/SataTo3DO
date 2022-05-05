@@ -48,24 +48,15 @@ static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw
     int index = 4+8*i;
     //OxAA as id mean lead out
     currentDisc.tracks[i].id = readBuffer[index + 2];
-    currentDisc.tracks[i].ADR = readBuffer[index + 1]>>4;
-    currentDisc.tracks[i].CTRL = readBuffer[index + 1]&0xF;
-    currentDisc.tracks[i].msf[2] = readBuffer[index + 5];
+    currentDisc.tracks[i].CTRL_ADR = readBuffer[index + 1];
+    currentDisc.tracks[i].msf[0] = readBuffer[index + 5]; //MSF
     currentDisc.tracks[i].msf[1] = readBuffer[index + 6];
-    currentDisc.tracks[i].msf[0] = readBuffer[index + 7];
-    printf("Track[%d] 0x%x => %d:%d:%d\n", i, currentDisc.tracks[i].id, currentDisc.tracks[i].msf[2], currentDisc.tracks[i].msf[1], currentDisc.tracks[i].msf[0]);
+    currentDisc.tracks[i].msf[2] = readBuffer[index + 7];
+    printf("Track[%d] 0x%x (0x%x)=> %d:%d:%d\n", i, currentDisc.tracks[i].id, currentDisc.tracks[i].CTRL_ADR, currentDisc.tracks[i].msf[0], currentDisc.tracks[i].msf[1], currentDisc.tracks[i].msf[0]);
   }
-
-  //Get lead out info as disk info
-  currentDisc.msf[0] = currentDisc.tracks[currentDisc.last_track].msf[0];
-  currentDisc.msf[1] = currentDisc.tracks[currentDisc.last_track].msf[1];
-  currentDisc.msf[2] = currentDisc.tracks[currentDisc.last_track].msf[2];
-
-  printf("Disc duration is %2d:%2d:%2d\n", currentDisc.msf[2], currentDisc.msf[1], currentDisc.msf[0]);
-  currentDisc.format = 0x0; /*00 CD-DA or CD-ROM / 10 CD-I / 20 XA */
-  //Assume type is CD-DA or CD-ROM always
   currentDisc.mounted = true;
   set3doCDReady(true);
+  set3doDriveMounted(true);
 }
 
 
@@ -86,8 +77,18 @@ bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const
   currentDisc.nb_block = tuh_msc_get_block_count(dev_addr, cbw->lun);
   currentDisc.block_size = tuh_msc_get_block_size(dev_addr, cbw->lun);
 
+  int lba = currentDisc.nb_block + 150;
+  currentDisc.msf[0] = lba/(60*75);
+  lba %= 60*75;
+  currentDisc.msf[1] = lba / 75;
+  currentDisc.msf[2] = lba % 75;
+
+  //Assume type is CD-DA or CD-ROM always
+  currentDisc.format = 0x0; /*00 CD-DA or CD-ROM / 10 CD-I / 20 XA */
+
   printf("Disk Size: %lu MB\r\n", currentDisc.nb_block / ((1024*1024)/currentDisc.block_size));
   printf("Block Count = %lu, Block Size: %lu\r\n", currentDisc.nb_block, currentDisc.block_size);
+  printf("Disc duration is %2d:%2d:%2d\n", currentDisc.msf[0], currentDisc.msf[1], currentDisc.msf[2]);
 
   if (!tuh_msc_read_toc(dev_addr, cbw->lun, readBuffer, 1, 0, 0, read_toc_complete_cb)) {
       printf("Got error with toc read\n");
@@ -113,7 +114,6 @@ void tuh_msc_mount_cb(uint8_t dev_addr)
   printf("A USB MassStorage device is mounted\r\n");
   inquiry_cb_flag = false;
   tuh_msc_inquiry(dev_addr, lun, &inquiry_resp, inquiry_complete_cb);
-  set3doDriveMounted(true);
 }
 
 void tuh_msc_umount_cb(uint8_t dev_addr)
