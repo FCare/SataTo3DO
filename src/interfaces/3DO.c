@@ -4,19 +4,23 @@
 #include "pico/stdlib.h"
 #include "hardware/clocks.h"
 #include "hardware/gpio.h"
+#include "hardware/irq.h"
 #include "pico/multicore.h"
 
 #include "3DO.h"
 
+#define DATA_BUS_MASK (0xFF<<CDD0)
+
 #ifndef NO_READ_PIO
 #include "read.pio.h"
+#include "interrupt.pio.h"
 #endif
 
 #ifndef NO_WRITE_PIO
 #include "write.pio.h"
 #endif
 
-extern bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer, volatile bool *ready);
+extern bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer);
 
 #define GET_BUS(A) (((A)>>CDD0)&0xFF)
 
@@ -24,6 +28,7 @@ extern cd_s currentDisc;
 
 typedef enum{
   SPIN_UP = 0x2,
+  SET_MODE = 0x09,
   READ_DATA = 0x10,
   DATA_PATH_CHECK = 0x80,
   READ_ERROR = 0x82,
@@ -73,7 +78,11 @@ typedef enum{
 }CD_error_t;
 
 uint sm_read = -1;
+uint sm_interrupt = -1;
 uint sm_write = -1;
+
+bool interrupt = false;
+bool sendingData = false;
 
 uint8_t errorCode = POWER_OR_RESET_OCCURED;
 uint8_t status = DOOR_CLOSED;
@@ -125,16 +134,32 @@ void set3doData(uint32_t data) {
   while(gpio_get(CDHRD) != 0);
   while(gpio_get(CDHRD) != 1);
 #else
-  pio_sm_put_blocking(pio0, sm_write, data<<CDD0);
-  pio_sm_get_blocking(pio0, sm_write);
+  while (!pio_sm_is_tx_fifo_empty(pio0, sm_write));
+  pio_sm_put(pio0, sm_write, data<<CDD0);
+  while (pio_sm_is_rx_fifo_empty(pio0, sm_write));
+  pio_sm_get(pio0, sm_write);
 #endif
 }
 
-volatile bool block_ready = false;
-
+void set3doDataInterruptible(uint32_t data) {
+#ifdef NO_WRITE_PIO
+  gpio_put_masked(0xFF<<CDD0, (data&0xFF)<<CDD0);
+  while(gpio_get(CDHRD) != 0);
+  while(gpio_get(CDHRD) != 1);
+#else
+  while (pio_sm_is_tx_fifo_full(pio0, sm_write)) if (interrupt) return;
+  pio_sm_put(pio0, sm_write, data<<CDD0);
+  while (pio_sm_is_rx_fifo_empty(pio0, sm_write)) if (interrupt) return;
+  pio_sm_get(pio0, sm_write);
+#endif
+}
 
 void initiateData(void) {
+#ifdef NO_WRITE_PIO
+  gpio_set_dir_out_masked(DATA_BUS_MASK);
+#else
   pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
+#endif
   gpio_put(CDDTEN, 0x0);
 }
 
@@ -143,46 +168,61 @@ void closeData(void) {
 }
 
 void initiateResponse(CD_request_t request) {
+#ifdef NO_WRITE_PIO
+  gpio_set_dir_out_masked(DATA_BUS_MASK);
+#else
   pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
+#endif
   gpio_put(CDSTEN, 0x0);
   set3doData(request);
 }
 
 void closeRequestwithStatus() {
-  set3doData(status);
+#ifdef NO_WRITE_PIO
+  gpio_put_masked(0xFF<<CDD0, (data&0xFF)<<CDD0);
+  while(gpio_get(CDHRD) != 0);
+  while(gpio_get(CDHRD) != 1);
+  gpio_set_dir_in_masked(DATA_BUS_MASK);
+#else
+  while (!pio_sm_is_tx_fifo_empty(pio0, sm_write));
+  pio_sm_put(pio0, sm_write, status<<CDD0);
+  while (pio_sm_is_rx_fifo_empty(pio0, sm_write));
   gpio_put(CDSTEN, 0x1);
+  pio_sm_get(pio0, sm_write);
   pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
+#endif
 }
 
 void sendData(int startlba, int nb_block) {
-  uint8_t *buffer[2];
-  buffer[0] = malloc(currentDisc.block_size);
-  buffer[1] = malloc(currentDisc.block_size);
+  uint8_t buffer[2500];
+  int start = startlba;
 
   if (nb_block == 0) return;
-
-  readBlock(startlba, 1, buffer[nb_block%2], &block_ready);
+  sendingData = true;
   while (nb_block != 0) {
-    int idBuffer = nb_block%2;
+    readBlock(startlba, 1, &buffer[0]);
     nb_block--;
     startlba++;
-    while (block_ready == false) ;
-    block_ready = false;
-    if (nb_block > 0) readBlock(startlba, 1, buffer[nb_block%2], &block_ready);
-    initiateData();
-    printf("Blco Size %d\n", currentDisc.block_size);
     for (int i = 0; i<currentDisc.block_size; i++) {
-      // printf("Data 0x%x\n", buffer[idBuffer][i]);
+      if (i == 0) initiateData();
+      // if (i < 10) printf("0x%x\n", buffer[i]);
+      interrupt = false;
+      set3doDataInterruptible(buffer[i]);
+      if (interrupt && sendingData) {
+        printf("Send status after interrupt\n");
+        sendingData = false;
+        set3doData(READ_DATA);
+        closeRequestwithStatus();
+      }
       if (i == 100) gpio_put(CDSTEN, 0x0);
-      set3doData(buffer[idBuffer][i]);
     }
     closeData();
   }
-  set3doData(READ_DATA);
-  closeRequestwithStatus();
-
-  free(buffer[0]);
-  free(buffer[1]);
+  if (sendingData) {
+    set3doData(READ_DATA);
+    closeRequestwithStatus();
+  }
+  sendingData = false;
 }
 
 void handleCommand(uint32_t data) {
@@ -225,7 +265,6 @@ void handleCommand(uint32_t data) {
       status &= ~CHECK_ERROR;
       errorCode = NO_ERROR;
       closeRequestwithStatus();
-      printf("Status is %x\n", status);
       break;
     case DATA_PATH_CHECK:
       for (int i=0; i<6; i++) {
@@ -255,12 +294,11 @@ void handleCommand(uint32_t data) {
       for (int i=0; i<6; i++) {
         data_in[i] = GET_BUS(get3doData());
       }
-      printf("READ DATA\n");
+      printf("READ DATA MSF %d:%d:%d\n", data_in[0], data_in[1], data_in[2]);
       if (data_in[3] == 0x00) {
         //MSF
         int lba = data_in[0]*60*75+data_in[1]*75+data_in[2] - 150;
         int nb_block = (data_in[4]<<8)|data_in[5];
-        printf("From block 0%x to 0x%x\n", lba, lba+nb_block);
         sendData(lba, nb_block);
       } else {
         //LBA not supported yet
@@ -345,6 +383,20 @@ void handleCommand(uint32_t data) {
       set3doData(0x0);
       closeRequestwithStatus();
       break;
+      case SET_MODE:
+        for (int i=0; i<6; i++) {
+          data_in[i] = GET_BUS(get3doData());
+        }
+        if (data_in[0] == 0x3) {
+          if (data_in[1] & (0x80|0x40))
+            status |= DOUBLE_SPEED;
+          else
+            status &= ~DOUBLE_SPEED;
+        }
+        printf("SET_MODE\n");
+        initiateResponse(SET_MODE);
+        closeRequestwithStatus();
+        break;
     default: printf("unknown Cmd %x\n", request);
   }
 }
@@ -374,6 +426,22 @@ void core1_entry() {
     data_in = get3doData();
     handleCommand(data_in);
   }
+}
+
+// pio0 interrupt handler
+void on_pio0_irq() {
+  if (pio_interrupt_get(pio0, 0)) {
+      interrupt = true;
+      printf("CDEN\n");
+      if (!gpio_get(CDDTEN))
+      {
+        printf("Drain fifo\n");
+        pio_sm_drain_tx_fifo(pio0, sm_write);
+        // pio_sm_put(pio0, sm_write, 0xFF);
+      }
+  }
+  pio_interrupt_clear(pio0, 0);
+  irq_clear(PIO0_IRQ_0);
 }
 
 void _3DO_init() {
@@ -419,13 +487,20 @@ void _3DO_init() {
   gpio_init(CDHWR);
   gpio_set_dir(CDHWR, false);
 
-  gpio_set_dir_masked(0xFF<<CDD0, 0xFF<<CDD0);
-  gpio_init_mask(0xFF<<CDD0);
+  gpio_set_dir_masked(DATA_BUS_MASK, DATA_BUS_MASK);
+  gpio_init_mask(DATA_BUS_MASK);
+
+  pio_set_irq0_source_enabled(pio0, pis_interrupt0, true);
+  irq_set_exclusive_handler(PIO0_IRQ_0, on_pio0_irq);
+  irq_set_enabled(PIO0_IRQ_0, true);
 
 #ifndef NO_READ_PIO
   sm_read = 0;
+  sm_interrupt = 2;
   offset = pio_add_program(pio0, &read_program);
   read_program_init(pio0, sm_read, offset);
+  offset = pio_add_program(pio0, &interrupt_program);
+  interrupt_program_init(pio0, sm_interrupt, offset);
 #endif
 
 #ifndef NO_WRITE_PIO

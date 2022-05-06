@@ -28,21 +28,22 @@ uint8_t readBuffer[20480];
 
 cd_s currentDisc = {0};
 
-static volatile bool *read_done;
+static volatile bool read_done;
 
 static bool read10_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
-  *read_done = true;
+  printf("Block read\n");
+  read_done = true;
   return true;
 }
 
-bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer, volatile bool *ready) {
-  read_done = ready;
-  *read_done = false;
-  for (int i=0; i<10; i++) readBuffer[200+i] = i;
+bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer) {
+  read_done = false;
+  printf("Block request\n");
   if ( !tuh_msc_read10(currentDisc.dev_addr, currentDisc.lun, buffer, start, nb_block, read10_complete_cb)) {
     printf("Got error with block read\n");
     return false;
   }
+  while (read_done == false);
   return true;
 }
 static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
