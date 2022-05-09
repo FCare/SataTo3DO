@@ -135,8 +135,13 @@ void set3doData(uint32_t data) {
   while(gpio_get(CDHRD) != 0);
   while(gpio_get(CDHRD) != 1);
 #else
-  pio_sm_put_blocking(pio0, sm_write, data<<CDD0);
-  //pio_sm_get_blocking(pio0, sm_write);
+
+  while (pio_sm_is_tx_fifo_full(pio0, sm_write) && !interrupt) tight_loop_contents();
+  if (interrupt) {
+    printf("abort\n");
+    return;
+  }
+  pio_sm_put(pio0, sm_write, data<<CDD0);
 #endif
 }
 
@@ -145,7 +150,7 @@ void initiateData(void) {
   gpio_set_dir_out_masked(DATA_BUS_MASK);
 #else
   nbWord = 0;
-  pio_sm_clear_fifos(pio0, sm_write);
+  // pio_sm_clear_fifos(pio0, sm_write);
   pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
 #endif
   gpio_put(CDDTEN, 0x0);
@@ -161,7 +166,7 @@ void initiateResponse(CD_request_t request) {
   gpio_set_dir_out_masked(DATA_BUS_MASK);
 #else
   nbWord = 0;
-  pio_sm_clear_fifos(pio0, sm_write);
+  // pio_sm_clear_fifos(pio0, sm_write);
   pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
 #endif
   gpio_put(CDSTEN, 0x0);
@@ -186,9 +191,9 @@ void closeRequestwithStatus() {
 void sendData(int startlba, int nb_block) {
   uint8_t buffer[2500];
   int start = startlba;
+  bool needToSendStatus = true;
 
   if (nb_block == 0) return;
-  bool sendingData = true;
   while (nb_block != 0) {
     readBlock(startlba, 1, &buffer[0]);
     nb_block--;
@@ -198,17 +203,28 @@ void sendData(int startlba, int nb_block) {
     for (int i = 0; i<currentDisc.block_size; i++) {
       // if (i < 10) printf("0x%x\n", buffer[i]);
       set3doData(buffer[i]);
-      if (interrupt && sendingData) {
+      if (interrupt && needToSendStatus) {
+        absolute_time_t start = get_absolute_time();
+        interrupt = false;
+        needToSendStatus = false;
         // printf("Send status after interrupt\n");
-        sendingData = false;
+        pio_sm_drain_tx_fifo(pio0, sm_write);
+        // gpio_put(CDDTEN, 0x1);
         set3doData(READ_DATA);
         closeRequestwithStatus();
+        while(absolute_time_diff_us(start,get_absolute_time()) < 600) {
+          if (!pio_sm_is_tx_fifo_full(pio0, sm_write))
+            pio_sm_put(pio0, sm_write, buffer[i++]<<CDD0);
+        }
+        pio_sm_drain_tx_fifo(pio0, sm_write);
+        closeData();
+        return;
       }
       if (i == 100) gpio_put(CDSTEN, 0x0);
     }
     closeData();
   }
-  if (sendingData) {
+  if (needToSendStatus) {
     set3doData(READ_DATA);
     closeRequestwithStatus();
   }
@@ -420,7 +436,7 @@ void core1_entry() {
 // pio0 interrupt handler
 void on_pio0_irq() {
   if (pio_interrupt_get(pio0, 0)) {
-      interrupt = true;
+      if (!gpio_get(CDDTEN) && !gpio_get(CDSTEN)) interrupt = true;
       nbWord++;
       // if (!gpio_get(CDDTEN))
       // {
