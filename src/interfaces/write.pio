@@ -11,9 +11,10 @@
 public entry_point:
 .wrap_target
     wait 0 gpio CDHRD ;wait for request to read
+    pull block
     out pins,32 ;output data
     wait 1 gpio CDHRD ;wait for end of request
-    push block
+    ;push block
 .wrap
 
 % c-sdk {
@@ -22,7 +23,9 @@ static inline void write_program_init(PIO pio, uint sm, uint offset) {
     pio_sm_config c = write_program_get_default_config(offset);
 
     sm_config_set_out_pins(&c, 0, 32);
-    sm_config_set_out_shift(&c, true, true, 32);
+    sm_config_set_out_shift(&c, true, false, 32);
+
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
 
     // Load our configuration, and jump to the start of the program
     pio_sm_init(pio, sm, offset, &c);

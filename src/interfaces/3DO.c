@@ -81,8 +81,9 @@ uint sm_read = -1;
 uint sm_interrupt = -1;
 uint sm_write = -1;
 
-bool interrupt = false;
-bool sendingData = false;
+uint nbWord = 0;
+
+volatile bool interrupt = false;
 
 uint8_t errorCode = POWER_OR_RESET_OCCURED;
 uint8_t status = DOOR_CLOSED;
@@ -134,23 +135,8 @@ void set3doData(uint32_t data) {
   while(gpio_get(CDHRD) != 0);
   while(gpio_get(CDHRD) != 1);
 #else
-  while (!pio_sm_is_tx_fifo_empty(pio0, sm_write));
-  pio_sm_put(pio0, sm_write, data<<CDD0);
-  while (pio_sm_is_rx_fifo_empty(pio0, sm_write));
-  pio_sm_get(pio0, sm_write);
-#endif
-}
-
-void set3doDataInterruptible(uint32_t data) {
-#ifdef NO_WRITE_PIO
-  gpio_put_masked(0xFF<<CDD0, (data&0xFF)<<CDD0);
-  while(gpio_get(CDHRD) != 0);
-  while(gpio_get(CDHRD) != 1);
-#else
-  while (pio_sm_is_tx_fifo_full(pio0, sm_write)) if (interrupt) return;
-  pio_sm_put(pio0, sm_write, data<<CDD0);
-  while (pio_sm_is_rx_fifo_empty(pio0, sm_write)) if (interrupt) return;
-  pio_sm_get(pio0, sm_write);
+  pio_sm_put_blocking(pio0, sm_write, data<<CDD0);
+  //pio_sm_get_blocking(pio0, sm_write);
 #endif
 }
 
@@ -158,12 +144,15 @@ void initiateData(void) {
 #ifdef NO_WRITE_PIO
   gpio_set_dir_out_masked(DATA_BUS_MASK);
 #else
+  nbWord = 0;
+  pio_sm_clear_fifos(pio0, sm_write);
   pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
 #endif
   gpio_put(CDDTEN, 0x0);
 }
 
 void closeData(void) {
+  while(!pio_sm_is_tx_fifo_empty(pio0, sm_write));
   gpio_put(CDDTEN, 0x1);
 }
 
@@ -171,6 +160,8 @@ void initiateResponse(CD_request_t request) {
 #ifdef NO_WRITE_PIO
   gpio_set_dir_out_masked(DATA_BUS_MASK);
 #else
+  nbWord = 0;
+  pio_sm_clear_fifos(pio0, sm_write);
   pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
 #endif
   gpio_put(CDSTEN, 0x0);
@@ -179,17 +170,16 @@ void initiateResponse(CD_request_t request) {
 
 void closeRequestwithStatus() {
 #ifdef NO_WRITE_PIO
-  gpio_put_masked(0xFF<<CDD0, (data&0xFF)<<CDD0);
+  gpio_put_masked(0xFF<<CDD0, (status&0xFF)<<CDD0);
   while(gpio_get(CDHRD) != 0);
   while(gpio_get(CDHRD) != 1);
   gpio_set_dir_in_masked(DATA_BUS_MASK);
 #else
-  while (!pio_sm_is_tx_fifo_empty(pio0, sm_write));
-  pio_sm_put(pio0, sm_write, status<<CDD0);
-  while (pio_sm_is_rx_fifo_empty(pio0, sm_write));
+  set3doData(status);
+  while (!pio_sm_is_tx_fifo_empty(pio0, sm_write)) tight_loop_contents();
   gpio_put(CDSTEN, 0x1);
-  pio_sm_get(pio0, sm_write);
   pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
+
 #endif
 }
 
@@ -198,18 +188,18 @@ void sendData(int startlba, int nb_block) {
   int start = startlba;
 
   if (nb_block == 0) return;
-  sendingData = true;
+  bool sendingData = true;
   while (nb_block != 0) {
     readBlock(startlba, 1, &buffer[0]);
     nb_block--;
     startlba++;
+    interrupt = false;
+    initiateData();
     for (int i = 0; i<currentDisc.block_size; i++) {
-      if (i == 0) initiateData();
       // if (i < 10) printf("0x%x\n", buffer[i]);
-      interrupt = false;
-      set3doDataInterruptible(buffer[i]);
+      set3doData(buffer[i]);
       if (interrupt && sendingData) {
-        printf("Send status after interrupt\n");
+        // printf("Send status after interrupt\n");
         sendingData = false;
         set3doData(READ_DATA);
         closeRequestwithStatus();
@@ -222,7 +212,6 @@ void sendData(int startlba, int nb_block) {
     set3doData(READ_DATA);
     closeRequestwithStatus();
   }
-  sendingData = false;
 }
 
 void handleCommand(uint32_t data) {
@@ -432,13 +421,13 @@ void core1_entry() {
 void on_pio0_irq() {
   if (pio_interrupt_get(pio0, 0)) {
       interrupt = true;
-      printf("CDEN\n");
-      if (!gpio_get(CDDTEN))
-      {
-        printf("Drain fifo\n");
-        pio_sm_drain_tx_fifo(pio0, sm_write);
-        // pio_sm_put(pio0, sm_write, 0xFF);
-      }
+      nbWord++;
+      // if (!gpio_get(CDDTEN))
+      // {
+      //   printf("Drain fifo\n");
+      //   pio_sm_drain_tx_fifo(pio0, sm_write);
+      //   // pio_sm_put(pio0, sm_write, 0xFF);
+      // }
   }
   pio_interrupt_clear(pio0, 0);
   irq_clear(PIO0_IRQ_0);
@@ -493,6 +482,10 @@ void _3DO_init() {
   pio_set_irq0_source_enabled(pio0, pis_interrupt0, true);
   irq_set_exclusive_handler(PIO0_IRQ_0, on_pio0_irq);
   irq_set_enabled(PIO0_IRQ_0, true);
+
+  for (int i = 0; i<32; i++) {
+    gpio_set_drive_strength(i, GPIO_DRIVE_STRENGTH_12MA);
+  }
 
 #ifndef NO_READ_PIO
   sm_read = 0;
