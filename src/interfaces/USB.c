@@ -32,6 +32,7 @@ static volatile bool read_done;
 
 static bool read10_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   read_done = true;
+  printf("Read ok\n");
   return true;
 }
 
@@ -41,6 +42,7 @@ bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer) {
     printf("Got error with block read\n");
     return false;
   }
+  printf("Read req\n");
   while (read_done == false);
   return true;
 }
