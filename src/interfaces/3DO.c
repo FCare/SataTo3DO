@@ -171,11 +171,6 @@ void set3doRaw(uint32_t data, bool cdsten, bool outcdsten, bool cddten, bool out
   // pio_sm_put(pio0, sm_write, 0x0);
 }
 
-void set3doStatus(uint32_t data) {
-  // getIt();
-  // set3doRaw(data, 0, 0, 1, 1, false);
-}
-
 
 void set3doData(uint32_t data, bool statusReady, bool continueData) {
   // set3doRaw(data, !statusReady, !statusReady, 0, !continueData, true);
@@ -188,15 +183,6 @@ void initiateData(void) {
   //   pio_sm_exec(pio0, sm_write, instr_pull);
   // pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
   // gpio_put(CDDTEN, 0x0);
-}
-
-void initiateResponse(CD_request_t request) {
-  // pio_sm_clear_fifos(pio0, sm_write);
-  // while(!pio_sm_is_tx_fifo_empty(pio0, sm_write))
-  //   pio_sm_exec(pio0, sm_write, instr_pull);
-  // pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
-  // set3doStatus(request);
-  // gpio_put(CDSTEN, 0x0);
 }
 
 void closeRequestwithStatus() {
@@ -292,13 +278,12 @@ void sendData(int startlba, int nb_block) {
   //     if (i == 34) statusReady = true;;
   //   }
   // }
-  // set3doStatus(READ_DATA);
-  // closeRequestwithStatus();
+
 }
 
 void restartPio(uint8_t channel) {
   pio_sm_set_enabled(pio0, sm[channel], false);
-  // pio_sm_clear_fifos(pio0, sm[channel]);
+  pio_sm_drain_tx_fifo(pio0, sm[channel]);
   pio_sm_restart(pio0, sm[channel]);
   pio_sm_exec(pio0, sm[channel], instr_jmp[channel]);
   pio_sm_set_enabled(pio0, sm[channel], true);
@@ -308,11 +293,28 @@ void startDMA(uint8_t access, uint8_t *buffer, uint32_t nbWord) {
   dma_channel_transfer_from_buffer_now(channel[access], buffer, nbWord);
 }
 
+void sendAnswer(uint8_t *buffer, uint32_t nbWord, uint8_t access) {
+  restartPio(access);
+  startDMA(access, buffer, nbWord);
+  pio_sm_set_consecutive_pindirs(pio0, sm[access], CDD0, 8, true);
+  gpio_put(CDSTEN + access, 0x0);
+
+  dma_channel_wait_for_finish_blocking(access);
+  while(!pio_sm_is_tx_fifo_empty(pio0, sm[access]));
+  while (pio_sm_get_pc(pio0, sm[access]) != sm_offset[access]);
+  // while (pio_sm_get_pc(pio0, sm[access]) != sm_offset[access]) printf("Pc %d\n",pio_sm_get_pc(pio0, sm[access]));
+  // while (pio_sm_get_pc(pio0, sm[access]) != sm_offset[access]) printf("Pc %d\n",pio_sm_get_pc(pio0, sm[access]));
+  gpio_put(CDSTEN + access, 0x1);
+  pio_sm_set_consecutive_pindirs(pio0, sm[access], CDD0, 8, false);
+
+}
+
 void handleCommand(uint32_t data) {
   CD_request_t request = (CD_request_t) GET_BUS(data);
   bool isCmd = (data>>CDCMD)&0x1 == 0x0;
   uint32_t data_in[6];
   uint8_t buffer[12];
+  uint index = 0;
 
   // pio0->irq  = 0;
 
@@ -322,73 +324,64 @@ void handleCommand(uint32_t data) {
       data_in[i] = get3doData();
     }
       printf("READ ID\n");
-      buffer[0] = READ_ID;
-      buffer[1] =0x00; //manufacture Id
-      buffer[2] =0x10;
-      buffer[3] =0x00; //manufacture number
-      buffer[4] =0x01;
-      buffer[5] =0x30;
-      buffer[6] =0x75;
-      buffer[7] =0x00; //revision number
-      buffer[8] =0x00;
-      buffer[9] =0x00; //flag
-      buffer[10] =0x00;
-      buffer[11] = status;
-      restartPio(CHAN_WRITE_STATUS);
-      startDMA(CHAN_WRITE_STATUS, &buffer[0], 12);
-      pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_STATUS], CDD0, 8, true);
-      gpio_put(CDSTEN, 0x0);
-      dma_channel_wait_for_finish_blocking(CHAN_WRITE_STATUS);
-      // while (dma_channel_is_busy(CHAN_WRITE_STATUS)) {
-        // printf("La %d (%d)\n", pio_sm_get_pc(pio0, sm[CHAN_WRITE_STATUS]), sm_offset[CHAN_WRITE_STATUS]);
-      // };
-      printf("DMA done\n");
-      while(!pio_sm_is_tx_fifo_empty(pio0, sm[CHAN_WRITE_STATUS]));
-      while (pio_sm_get_pc(pio0, sm[CHAN_WRITE_STATUS]) != sm_offset[CHAN_WRITE_STATUS]);
-      pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_STATUS], CDD0, 8, false);
-      gpio_put(CDSTEN, 0x1);
+      buffer[index++] = READ_ID;
+      buffer[index++] =0x00; //manufacture Id
+      buffer[index++] =0x10;
+      buffer[index++] =0x00; //manufacture number
+      buffer[index++] =0x01;
+      buffer[index++] =0x30;
+      buffer[index++] =0x75;
+      buffer[index++] =0x00; //revision number
+      buffer[index++] =0x00;
+      buffer[index++] =0x00; //flag
+      buffer[index++] =0x00;
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
     case READ_ERROR:
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
       }
       printf("READ ERROR\n");
-      initiateResponse(READ_ERROR);
-      set3doStatus(0x00);
-      set3doStatus(0x00);
-      set3doStatus(errorCode); //error code
-      set3doStatus(0x00);
-      set3doStatus(0x00);
-      set3doStatus(0x00);
-      set3doStatus(0x00);
-      set3doStatus(0x00);
+      buffer[index++] = READ_ERROR;
+      buffer[index++] = 0x00;
+      buffer[index++] = 0x00;
+      buffer[index++] = errorCode; //error code
+      buffer[index++] = 0x00;
+      buffer[index++] = 0x00;
+      buffer[index++] = 0x00;
+      buffer[index++] = 0x00;
+      buffer[index++] = 0x00;
       status &= ~CHECK_ERROR;
       errorCode = NO_ERROR;
-      closeRequestwithStatus();
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
     case DATA_PATH_CHECK:
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
       }
       printf("DATA_PATH_CHECK\n");
-      initiateResponse(DATA_PATH_CHECK);
-      set3doStatus(0xAA); //This means ok
-      set3doStatus(0x55); //This means ok. Not the case when no disc
-      closeRequestwithStatus();
+      buffer[index++] = DATA_PATH_CHECK;
+      buffer[index++] = 0xAA; //This means ok
+      buffer[index++] = 0x55; //This means ok. Not the case when no disc
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
     case SPIN_UP:
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
       }
       printf("SPIN UP\n");
-      initiateResponse(SPIN_UP);
+      buffer[index++] = SPIN_UP;
       if (!(status & DISK_OK)) {
         status |= CHECK_ERROR;
         errorCode |= DISC_REMOVED;
       } else {
         status |= SPINNING;
       }
-      closeRequestwithStatus();
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
     case READ_DATA:
       for (int i=0; i<6; i++) {
@@ -410,78 +403,82 @@ void handleCommand(uint32_t data) {
         data_in[i] = get3doData();
       }
       printf("DISC_INFO\n");
-      initiateResponse(READ_DISC_INFO);
+      buffer[index++] = READ_DISC_INFO;
       // LBA = (((M*60)+S)*75+F)-150
       if (currentDisc.mounted) {
-        set3doStatus(currentDisc.format);
-        set3doStatus(currentDisc.first_track);
-        set3doStatus(currentDisc.last_track);
-        set3doStatus(currentDisc.msf[2]);
-        set3doStatus(currentDisc.msf[1]);
-        set3doStatus(currentDisc.msf[0]);
+        buffer[index++] = currentDisc.format;
+        buffer[index++] = currentDisc.first_track;
+        buffer[index++] = currentDisc.last_track;
+        buffer[index++] = currentDisc.msf[2];
+        buffer[index++] = currentDisc.msf[1];
+        buffer[index++] = currentDisc.msf[0];
       } else {
         errorCode = NOT_READY;
-        set3doStatus(0x0);
-        set3doStatus(0x0);
-        set3doStatus(0x0);
-        set3doStatus(0x0);
-        set3doStatus(0x0);
-        set3doStatus(0x0);
+        buffer[index++] = 0x0;
+        buffer[index++] = 0x0;
+        buffer[index++] = 0x0;
+        buffer[index++] = 0x0;
+        buffer[index++] = 0x0;
+        buffer[index++] = 0x0;
       }
-      closeRequestwithStatus();
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
     case READ_TOC:
       for (int i=0; i<6; i++) {
         data_in[i] = GET_BUS(get3doData());
       }
       printf("READ_TOC %x\n", data_in[2]);
-      initiateResponse(READ_TOC);
-      set3doStatus(0x0); //NixByte?
-      set3doStatus(currentDisc.tracks[data_in[2]].CTRL_ADR); //ADDR
-      set3doStatus(currentDisc.tracks[data_in[2]].id); //ENT_NUMBER
-      set3doStatus(0x0);//Format
-      set3doStatus(currentDisc.tracks[data_in[2]].msf[0]);
-      set3doStatus(currentDisc.tracks[data_in[2]].msf[1]);
-      set3doStatus(currentDisc.tracks[data_in[2]].msf[2]);
-      set3doStatus(0x0);
-      closeRequestwithStatus();
+      buffer[index++] = READ_TOC;
+      buffer[index++] = 0x0; //NixByte?
+      buffer[index++] = currentDisc.tracks[data_in[2]].CTRL_ADR; //ADDR
+      buffer[index++] = currentDisc.tracks[data_in[2]].id; //ENT_NUMBER
+      buffer[index++] = 0x0;//Format
+      buffer[index++] = currentDisc.tracks[data_in[2]].msf[0];
+      buffer[index++] = currentDisc.tracks[data_in[2]].msf[1];
+      buffer[index++] = currentDisc.tracks[data_in[2]].msf[2];
+      buffer[index++] = 0x0;
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
     case READ_SESSION:
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
       }
       printf("READ_SESSION\n");
-      initiateResponse(READ_SESSION);
+      buffer[index++] = READ_SESSION;
       if (currentDisc.multiSession) {
         //TBD with a multisession disc
-        set3doStatus(0x80);
-        set3doStatus(currentDisc.msf[2]); //might some other values like msf for multisession start
-        set3doStatus(currentDisc.msf[1]);
-        set3doStatus(currentDisc.msf[0]);
-        set3doStatus(0x0);
-        set3doStatus(0x0);
+        buffer[index++] = 0x80;
+        buffer[index++] = currentDisc.msf[2]; //might some other values like msf for multisession start
+        buffer[index++] = currentDisc.msf[1];
+        buffer[index++] = currentDisc.msf[0];
+        buffer[index++] = 0x0;
+        buffer[index++] = 0x0;
       } else {
-        set3doStatus(0x0);
-        set3doStatus(0x0);
-        set3doStatus(0x0);
-        set3doStatus(0x0);
-        set3doStatus(0x0);
-        set3doStatus(0x0);
+        buffer[index++] = 0x0;
+        buffer[index++] = 0x0;
+        buffer[index++] = 0x0;
+        buffer[index++] = 0x0;
+        buffer[index++] = 0x0;
+        buffer[index++] = 0x0;
       }
-      closeRequestwithStatus();
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
     break;
     case READ_CAPACITY:
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
       }
       printf("READ_CAPACITY\n");
-      initiateResponse(READ_CAPACITY);
-      set3doStatus(currentDisc.msf[2]);
-      set3doStatus(currentDisc.msf[1]);
-      set3doStatus(currentDisc.msf[0]);
-      set3doStatus(0x0);
-      set3doStatus(0x0);
-      closeRequestwithStatus();
+      buffer[index++] = READ_CAPACITY;
+      buffer[index++] = currentDisc.msf[2];
+      buffer[index++] = currentDisc.msf[1];
+      buffer[index++] = currentDisc.msf[0];
+      buffer[index++] = 0x0;
+      buffer[index++] = 0x0;
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
       case SET_MODE:
         for (int i=0; i<6; i++) {
@@ -494,8 +491,9 @@ void handleCommand(uint32_t data) {
             status &= ~DOUBLE_SPEED;
         }
         printf("SET_MODE\n");
-        initiateResponse(SET_MODE);
-        closeRequestwithStatus();
+        buffer[index++] = SET_MODE;
+        buffer[index++] = status;
+        sendAnswer(buffer, index, CHAN_WRITE_STATUS);
         break;
     default: printf("unknown Cmd %x\n", request);
   }

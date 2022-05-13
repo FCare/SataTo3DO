@@ -10,7 +10,7 @@
 
 public entry_point:
 .wrap_target
-    ;pull block
+    pull block
     wait 0 pin CDHRD ;wait for request to read
     out pins,8 ;output data
     wait 1 pin CDHRD ;wait for end of request
@@ -22,7 +22,7 @@ static inline void write_program_init(PIO pio, uint sm, uint offset) {
     pio_sm_config c = write_program_get_default_config(offset);
 
     sm_config_set_out_pins(&c, CDD0, 8);
-    sm_config_set_out_shift(&c, true, true, 8);
+    sm_config_set_out_shift(&c, true, false, 8);
 
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
 
