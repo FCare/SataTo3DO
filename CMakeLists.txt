@@ -36,7 +36,6 @@ src/interfaces/3DO.c
 )
 
 pico_generate_pio_header(SataTo3DO ${CMAKE_CURRENT_LIST_DIR}/src/interfaces/read.pio)
-pico_generate_pio_header(SataTo3DO ${CMAKE_CURRENT_LIST_DIR}/src/interfaces/interrupt.pio)
 pico_generate_pio_header(SataTo3DO ${CMAKE_CURRENT_LIST_DIR}/src/interfaces/write.pio)
 
 # enable usb output, disable uart output
@@ -50,4 +49,4 @@ endif()
 # create map/bin/hex/uf2 file etc.
 pico_add_extra_outputs(SataTo3DO)
 
-target_link_libraries(SataTo3DO PRIVATE pico_stdlib hardware_pio pico_multicore tinyusb_board tinyusb_host)
+target_link_libraries(SataTo3DO PRIVATE pico_stdlib hardware_pio hardware_dma pico_multicore tinyusb_board tinyusb_host)

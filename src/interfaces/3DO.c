@@ -5,6 +5,8 @@
 #include "hardware/clocks.h"
 #include "hardware/gpio.h"
 #include "hardware/irq.h"
+#include "hardware/dma.h"
+#include "hardware/structs/bus_ctrl.h"
 #include "pico/multicore.h"
 
 #include "3DO.h"
@@ -13,7 +15,6 @@
 
 #ifndef NO_READ_PIO
 #include "read.pio.h"
-#include "interrupt.pio.h"
 #endif
 
 #include "write.pio.h"
@@ -75,15 +76,25 @@ typedef enum{
   ILLEGAL_REQUEST = 0x17,
 }CD_error_t;
 
+typedef enum {
+  CHAN_WRITE_STATUS = 0,
+  CHAN_WRITE_DATA,
+  CHAN_MAX
+} DMA_chan_t;
+
+
+dma_channel_config config[CHAN_MAX];
+uint8_t sm[CHAN_MAX];
+uint8_t sm_offset[CHAN_MAX];
+int channel[CHAN_MAX];
+
+
 uint sm_read = -1;
-uint sm_interrupt = -1;
-uint sm_write = -1;
-uint sm_write_offset = -1;
 
 uint instr_out;
 uint instr_pull;
 uint instr_set;
-uint instr_jmp;
+uint instr_jmp[CHAN_MAX];
 uint instr_restart;
 
 uint nbWord = 0;
@@ -147,27 +158,27 @@ bool shallInterrupt()
 }
 
 void set3doRaw(uint32_t data, bool cdsten, bool outcdsten, bool cddten, bool outcddten, bool interruptible) {
-  while (pio_sm_is_tx_fifo_full(pio0, sm_write) && !(shallInterrupt() && interruptible)) tight_loop_contents();
-  if (interrupt && interruptible) {
-    // printf("It\n");
-    return;
-  }
-  pio_sm_put(pio0, sm_write, (cdsten << CDSTEN) | (cddten<<CDDTEN) |(data<<CDD0) | (((outcdsten << CDSTEN) | (outcddten<<CDDTEN) |(data<<CDD0))<<16));
-  while (pio_sm_is_tx_fifo_full(pio0, sm_write) && !(shallInterrupt() && interruptible)) tight_loop_contents();
-  if (interrupt && interruptible) {
-    return;
-  }
-  pio_sm_put(pio0, sm_write, 0x0);
+  // while (pio_sm_is_tx_fifo_full(pio0, sm_write) && !(shallInterrupt() && interruptible)) tight_loop_contents();
+  // if (interrupt && interruptible) {
+  //   // printf("It\n");
+  //   return;
+  // }
+  // pio_sm_put(pio0, sm_write, (cdsten << CDSTEN) | (cddten<<CDDTEN) |(data<<CDD0) | (((outcdsten << CDSTEN) | (outcddten<<CDDTEN) |(data<<CDD0))<<16));
+  // while (pio_sm_is_tx_fifo_full(pio0, sm_write) && !(shallInterrupt() && interruptible)) tight_loop_contents();
+  // if (interrupt && interruptible) {
+  //   return;
+  // }
+  // pio_sm_put(pio0, sm_write, 0x0);
 }
 
 void set3doStatus(uint32_t data) {
-  getIt();
-  set3doRaw(data, 0, 0, 1, 1, false);
+  // getIt();
+  // set3doRaw(data, 0, 0, 1, 1, false);
 }
 
 
 void set3doData(uint32_t data, bool statusReady, bool continueData) {
-  set3doRaw(data, !statusReady, !statusReady, 0, !continueData, true);
+  // set3doRaw(data, !statusReady, !statusReady, 0, !continueData, true);
 }
 
 
@@ -175,7 +186,7 @@ void initiateData(void) {
   // pio_sm_clear_fifos(pio0, sm_write);
   // while(!pio_sm_is_tx_fifo_empty(pio0, sm_write))
   //   pio_sm_exec(pio0, sm_write, instr_pull);
-  pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
+  // pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
   // gpio_put(CDDTEN, 0x0);
 }
 
@@ -183,112 +194,125 @@ void initiateResponse(CD_request_t request) {
   // pio_sm_clear_fifos(pio0, sm_write);
   // while(!pio_sm_is_tx_fifo_empty(pio0, sm_write))
   //   pio_sm_exec(pio0, sm_write, instr_pull);
-  pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
-  set3doStatus(request);
+  // pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
+  // set3doStatus(request);
   // gpio_put(CDSTEN, 0x0);
 }
 
 void closeRequestwithStatus() {
-  set3doRaw(status, 0, 1, 1, 1, false);
-  while (!pio_sm_is_tx_fifo_empty(pio0, sm_write)) tight_loop_contents();
-  pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
+  // set3doRaw(status, 0, 1, 1, 1, false);
+  // while (!pio_sm_is_tx_fifo_empty(pio0, sm_write)) tight_loop_contents();
+  // pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
 }
 
 void set3doInterruptStatus(uint32_t data) {
-  getIt();
-  set3doRaw(data, 0, 0, 0, 0, false);
+  // getIt();
+  // set3doRaw(data, 0, 0, 0, 0, false);
 }
 
 void closeRequestwithInterruptedStatus() {
-  set3doRaw(status, 0, 1, 0, 0, false);
-  while (!pio_sm_is_tx_fifo_empty(pio0, sm_write)) tight_loop_contents();
-  pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
+  // set3doRaw(status, 0, 1, 0, 0, false);
+  // while (!pio_sm_is_tx_fifo_empty(pio0, sm_write)) tight_loop_contents();
+  // pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
 }
 
 void sendData(int startlba, int nb_block) {
-  uint8_t buffer[2500];
-  int start = startlba;
-  bool statusReady = false;
+  // uint8_t buffer[2500];
+  // int start = startlba;
+  // bool statusReady = false;
+  //
+  // if (nb_block == 0) return;
+  // while (nb_block != 0) {
+  //   readBlock(startlba, 1, &buffer[0]);
+  //   nb_block--;
+  //   startlba++;
+  //   interrupt = false;
+  //   getIt(); //Clear It status
+  //   //Force out as buffer_0
+  //   // while(!pio_sm_is_tx_fifo_empty(pio0, sm_write))
+  //   //   pio_sm_exec(pio0, sm_write, instr_pull);
+  //   // pio_sm_exec(pio0, sm_write, instr_out);
+  //   //Start data
+  //   initiateData();
+  //   for (int i = 0; i<currentDisc.block_size; i++) {
+  //     // if (i < 10) printf("0x%x\n", buffer[i]);
+  //     set3doData(buffer[i], statusReady, true);
+  //     if (interrupt) {
+  //       // pio_sm_set_enabled(pio0, sm_write, false);
+  //   // Need to clear _input shift counter_, as well as FIFO, because there may be
+  //   // partial ISR contents left over from a previous run. sm_restart does this.
+  //       // printf("lvl %d %d\n", pio_sm_get_rx_fifo_level(pio0, sm_write), pio_sm_get_tx_fifo_level(pio0, sm_write) );
+  //       pio_sm_clear_fifos(pio0, sm_write);
+  //       // printf("after lvl %d %d\n", pio_sm_get_rx_fifo_level(pio0, sm_write), pio_sm_get_tx_fifo_level(pio0, sm_write) );
+  //       // pio_sm_restart(pio0, sm_write);
+  //       // printf("pc %d %d\n", pio_sm_get_pc(pio0, sm_write), sm_write_offset );
+  //       pio_sm_exec(pio0, sm_write, instr_jmp);
+  //       // printf("after pc %d %d\n", pio_sm_get_pc(pio0, sm_write), sm_write_offset );
+  //       // pio_sm_set_enabled(pio0, sm_write, true);
+  //       interrupt = false;
+  //       statusReady = false;
+  //       // printf("Send status after interrupt\n");
+  //       //Stack READ_DATA in TX fifo
+  //       //Drain the fifo so that OSR is full of READ_DATA
+  //       // pio_sm_put(pio0, sm_write, (1 << CDSTEN) | (0<<CDDTEN) |(buffer[i]<<CDD0) | (((1 << CDSTEN) | (0<<CDDTEN) |(buffer[i]<<CDD0))<<16));
+  //       // while(!pio_sm_is_tx_fifo_empty(pio0, sm_write))
+  //       //   pio_sm_exec(pio0, sm_write, instr_pull);
+  //       // pio_sm_exec(pio0, sm_write, instr_out);
+  //       // pio_sm_put(pio0, sm_write, 0x0);
+  //       //Push OSR to out
+  //       // printf("PC %x\n", pio_sm_get_pc(pio0, sm_write) - 21);
+  //       // gpio_put(CDDTEN, 0x1);
+  //       set3doInterruptStatus(READ_DATA);
+  //       closeRequestwithInterruptedStatus();
+  //           int val = gpio_get(CDEN);
+  //       absolute_time_t start = get_absolute_time();
+  //       while(absolute_time_diff_us(start,get_absolute_time()) < 590) {
+  //         if (pio_sm_is_tx_fifo_empty(pio0, sm_write)) {
+  //           uint val = buffer[i++];
+  //           uint data = (1 << CDSTEN) | (0<<CDDTEN) |(val<<CDD0) | (((1 << CDSTEN) | (0<<CDDTEN) |(val<<CDD0))<<16);
+  //           pio_sm_put(pio0, sm_write, data);
+  //           pio_sm_put(pio0, sm_write, 0x0);
+  //         }
+  //       }
+  //       // pio_sm_set_enabled(pio0, sm_write, false);
+  //       pio_sm_clear_fifos(pio0, sm_write);
+  //       // pio_sm_restart(pio0, sm_write);
+  //       // printf("pc %d %d\n", pio_sm_get_pc(pio0, sm_write), sm_write_offset );
+  //       uint data = (1<< CDSTEN) | (1<<CDDTEN);
+  //       pio_sm_put(pio0, sm_write, data);
+  //       pio_sm_exec(pio0, sm_write, instr_jmp);
+  //       while (pio_sm_get_pc(pio0, sm_write) != sm_write_offset + 3);
+  //       pio_sm_exec(pio0, sm_write, instr_jmp);
+  //       // pio_sm_set_enabled(pio0, sm_write, true);
+  //
+  //       // pio_sm_drain_tx_fifo(pio0, sm_write);
+  //       printf("CDEN %d\n", val);
+  //       return;
+  //     }
+  //     if (i == 34) statusReady = true;;
+  //   }
+  // }
+  // set3doStatus(READ_DATA);
+  // closeRequestwithStatus();
+}
 
-  if (nb_block == 0) return;
-  while (nb_block != 0) {
-    readBlock(startlba, 1, &buffer[0]);
-    nb_block--;
-    startlba++;
-    interrupt = false;
-    getIt(); //Clear It status
-    //Force out as buffer_0
-    // while(!pio_sm_is_tx_fifo_empty(pio0, sm_write))
-    //   pio_sm_exec(pio0, sm_write, instr_pull);
-    // pio_sm_exec(pio0, sm_write, instr_out);
-    //Start data
-    initiateData();
-    for (int i = 0; i<currentDisc.block_size; i++) {
-      // if (i < 10) printf("0x%x\n", buffer[i]);
-      set3doData(buffer[i], statusReady, true);
-      if (interrupt) {
-        // pio_sm_set_enabled(pio0, sm_write, false);
-    // Need to clear _input shift counter_, as well as FIFO, because there may be
-    // partial ISR contents left over from a previous run. sm_restart does this.
-        // printf("lvl %d %d\n", pio_sm_get_rx_fifo_level(pio0, sm_write), pio_sm_get_tx_fifo_level(pio0, sm_write) );
-        pio_sm_clear_fifos(pio0, sm_write);
-        // printf("after lvl %d %d\n", pio_sm_get_rx_fifo_level(pio0, sm_write), pio_sm_get_tx_fifo_level(pio0, sm_write) );
-        // pio_sm_restart(pio0, sm_write);
-        // printf("pc %d %d\n", pio_sm_get_pc(pio0, sm_write), sm_write_offset );
-        pio_sm_exec(pio0, sm_write, instr_jmp);
-        // printf("after pc %d %d\n", pio_sm_get_pc(pio0, sm_write), sm_write_offset );
-        // pio_sm_set_enabled(pio0, sm_write, true);
-        interrupt = false;
-        statusReady = false;
-        // printf("Send status after interrupt\n");
-        //Stack READ_DATA in TX fifo
-        //Drain the fifo so that OSR is full of READ_DATA
-        // pio_sm_put(pio0, sm_write, (1 << CDSTEN) | (0<<CDDTEN) |(buffer[i]<<CDD0) | (((1 << CDSTEN) | (0<<CDDTEN) |(buffer[i]<<CDD0))<<16));
-        // while(!pio_sm_is_tx_fifo_empty(pio0, sm_write))
-        //   pio_sm_exec(pio0, sm_write, instr_pull);
-        // pio_sm_exec(pio0, sm_write, instr_out);
-        // pio_sm_put(pio0, sm_write, 0x0);
-        //Push OSR to out
-        // printf("PC %x\n", pio_sm_get_pc(pio0, sm_write) - 21);
-        // gpio_put(CDDTEN, 0x1);
-        set3doInterruptStatus(READ_DATA);
-        closeRequestwithInterruptedStatus();
-            int val = gpio_get(CDEN);
-        absolute_time_t start = get_absolute_time();
-        while(absolute_time_diff_us(start,get_absolute_time()) < 590) {
-          if (pio_sm_is_tx_fifo_empty(pio0, sm_write)) {
-            uint val = buffer[i++];
-            uint data = (1 << CDSTEN) | (0<<CDDTEN) |(val<<CDD0) | (((1 << CDSTEN) | (0<<CDDTEN) |(val<<CDD0))<<16);
-            pio_sm_put(pio0, sm_write, data);
-            pio_sm_put(pio0, sm_write, 0x0);
-          }
-        }
-        // pio_sm_set_enabled(pio0, sm_write, false);
-        pio_sm_clear_fifos(pio0, sm_write);
-        // pio_sm_restart(pio0, sm_write);
-        // printf("pc %d %d\n", pio_sm_get_pc(pio0, sm_write), sm_write_offset );
-        uint data = (1<< CDSTEN) | (1<<CDDTEN);
-        pio_sm_put(pio0, sm_write, data);
-        pio_sm_exec(pio0, sm_write, instr_jmp);
-        while (pio_sm_get_pc(pio0, sm_write) != sm_write_offset + 3);
-        pio_sm_exec(pio0, sm_write, instr_jmp);
-        // pio_sm_set_enabled(pio0, sm_write, true);
+void restartPio(uint8_t channel) {
+  pio_sm_set_enabled(pio0, sm[channel], false);
+  // pio_sm_clear_fifos(pio0, sm[channel]);
+  pio_sm_restart(pio0, sm[channel]);
+  pio_sm_exec(pio0, sm[channel], instr_jmp[channel]);
+  pio_sm_set_enabled(pio0, sm[channel], true);
+}
 
-        // pio_sm_drain_tx_fifo(pio0, sm_write);
-        printf("CDEN %d\n", val);
-        return;
-      }
-      if (i == 34) statusReady = true;;
-    }
-  }
-  set3doStatus(READ_DATA);
-  closeRequestwithStatus();
+void startDMA(uint8_t access, uint8_t *buffer, uint32_t nbWord) {
+  dma_channel_transfer_from_buffer_now(channel[access], buffer, nbWord);
 }
 
 void handleCommand(uint32_t data) {
   CD_request_t request = (CD_request_t) GET_BUS(data);
   bool isCmd = (data>>CDCMD)&0x1 == 0x0;
   uint32_t data_in[6];
+  uint8_t buffer[12];
 
   // pio0->irq  = 0;
 
@@ -298,18 +322,31 @@ void handleCommand(uint32_t data) {
       data_in[i] = get3doData();
     }
       printf("READ ID\n");
-      initiateResponse(READ_ID);
-      set3doStatus(0x00); //manufacture Id
-      set3doStatus(0x10);
-      set3doStatus(0x00); //manufacture number
-      set3doStatus(0x01);
-      set3doStatus(0x30);
-      set3doStatus(0x75);
-      set3doStatus(0x00); //revision number
-      set3doStatus(0x00);
-      set3doStatus(0x00); //flag
-      set3doStatus(0x00);
-      closeRequestwithStatus();
+      buffer[0] = READ_ID;
+      buffer[1] =0x00; //manufacture Id
+      buffer[2] =0x10;
+      buffer[3] =0x00; //manufacture number
+      buffer[4] =0x01;
+      buffer[5] =0x30;
+      buffer[6] =0x75;
+      buffer[7] =0x00; //revision number
+      buffer[8] =0x00;
+      buffer[9] =0x00; //flag
+      buffer[10] =0x00;
+      buffer[11] = status;
+      restartPio(CHAN_WRITE_STATUS);
+      startDMA(CHAN_WRITE_STATUS, &buffer[0], 12);
+      pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_STATUS], CDD0, 8, true);
+      gpio_put(CDSTEN, 0x0);
+      dma_channel_wait_for_finish_blocking(CHAN_WRITE_STATUS);
+      // while (dma_channel_is_busy(CHAN_WRITE_STATUS)) {
+        // printf("La %d (%d)\n", pio_sm_get_pc(pio0, sm[CHAN_WRITE_STATUS]), sm_offset[CHAN_WRITE_STATUS]);
+      // };
+      printf("DMA done\n");
+      while(!pio_sm_is_tx_fifo_empty(pio0, sm[CHAN_WRITE_STATUS]));
+      while (pio_sm_get_pc(pio0, sm[CHAN_WRITE_STATUS]) != sm_offset[CHAN_WRITE_STATUS]);
+      pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_STATUS], CDD0, 8, false);
+      gpio_put(CDSTEN, 0x1);
       break;
     case READ_ERROR:
       for (int i=0; i<6; i++) {
@@ -464,6 +501,28 @@ void handleCommand(uint32_t data) {
   }
 }
 
+void setupDMA(uint8_t access) {
+  channel[access] = dma_claim_unused_channel(true);
+  config[access] = dma_channel_get_default_config(channel[access]);
+  channel_config_set_transfer_data_size(&config[access], DMA_SIZE_8);
+  channel_config_set_read_increment(&config[access], true);
+  channel_config_set_write_increment(&config[access], false);
+  channel_config_set_irq_quiet(&config[access], true);
+  channel_config_set_dreq(&config[access], DREQ_PIO0_TX0 + access);
+  dma_channel_set_write_addr(channel[access], &pio0->txf[sm[access]], false);
+  dma_channel_set_config(channel[access], &config[access], false);
+
+  bus_ctrl_hw->priority = BUSCTRL_BUS_PRIORITY_DMA_W_BITS | BUSCTRL_BUS_PRIORITY_DMA_R_BITS;
+}
+
+void pio_program_init(int channel) {
+  sm[channel] = channel;
+  sm_offset[channel] = pio_add_program(pio0, &write_program);
+  write_program_init(pio0, sm[channel], sm_offset[channel]);
+  instr_jmp[channel] = pio_encode_jmp(sm_offset[channel]);
+  printf("Prog %d offset %d\n", channel, sm_offset[channel]);
+}
+
 void core1_entry() {
 
   uint32_t data_in;
@@ -472,11 +531,17 @@ void core1_entry() {
   instr_out = pio_encode_out(pio_null, 16);
   instr_pull = pio_encode_pull(pio_null, 32);
   instr_set = pio_encode_set(pio_pins, 0b11);
-  instr_jmp = pio_encode_jmp(sm_write_offset+1);
-  instr_restart = pio_encode_jmp(sm_write_offset);
+  // instr_restart = pio_encode_jmp(sm_write_offset);
   // init_3DO_read_interface();
   // init_3DO_write_interface();
-  pio_sm_set_enabled(pio0, sm_write, true);
+
+  for (int i = 0; i< CHAN_MAX; i++) {
+    pio_program_init(i);
+    setupDMA(i);
+  }
+
+
+  // pio_sm_set_enabled(pio0, sm_write, true);
 
   printf("Ready\n");
   while (1){
@@ -497,22 +562,6 @@ void core1_entry() {
     data_in = get3doData();
     handleCommand(data_in);
   }
-}
-
-// pio0 interrupt handler
-void on_pio0_irq() {
-  // if (pio_interrupt_get(pio0, 0)) {
-  //     // if (!gpio_get(CDDTEN) && !gpio_get(CDSTEN)) interrupt = true;
-  //     nbWord++;
-  //     // if (!gpio_get(CDDTEN))
-  //     // {
-  //     //   printf("Drain fifo\n");
-  //     //   pio_sm_drain_tx_fifo(pio0, sm_write);
-  //     //   // pio_sm_put(pio0, sm_write, 0xFF);
-  //     // }
-  // }
-  // pio_interrupt_clear(pio0, 0);
-  irq_clear(PIO0_IRQ_0);
 }
 
 void _3DO_init() {
@@ -542,12 +591,12 @@ void _3DO_init() {
 
 
   gpio_init(CDSTEN);
-  // gpio_put(CDSTEN, 1);
+  gpio_put(CDSTEN, 1);
   gpio_set_dir(CDSTEN, true);
   // gpio_set_pulls(CDSTEN, false, true);
 
   gpio_init(CDDTEN);
-  // gpio_put(CDDTEN, 1);
+  gpio_put(CDDTEN, 1);
   gpio_set_dir(CDDTEN, true);
   // gpio_set_pulls(CDDTEN, false, true);
 
@@ -561,21 +610,14 @@ void _3DO_init() {
   gpio_set_dir_masked(DATA_BUS_MASK, DATA_BUS_MASK);
   gpio_init_mask(DATA_BUS_MASK);
 
-  pio_set_irq0_source_enabled(pio0, pis_interrupt0, true);
-  // irq_set_exclusive_handler(PIO0_IRQ_0, on_pio0_irq);
-  // irq_set_enabled(PIO0_IRQ_0, true);
-
   for (int i = 0; i<32; i++) {
     gpio_set_drive_strength(i, GPIO_DRIVE_STRENGTH_12MA);
   }
 
 #ifndef NO_READ_PIO
-  sm_read = 0;
-  sm_interrupt = 2;
+  sm_read = CHAN_MAX;
   offset = pio_add_program(pio0, &read_program);
   read_program_init(pio0, sm_read, offset);
-  offset = pio_add_program(pio0, &interrupt_program);
-  interrupt_program_init(pio0, sm_interrupt, offset);
 #endif
 
   pio_gpio_init(pio0, CDD0);
@@ -586,11 +628,6 @@ void _3DO_init() {
   pio_gpio_init(pio0, CDD5);
   pio_gpio_init(pio0, CDD6);
   pio_gpio_init(pio0, CDD7);
-  pio_gpio_init(pio0, CDSTEN);
-  pio_gpio_init(pio0, CDDTEN);
-  sm_write = 1;
-  sm_write_offset = pio_add_program(pio0, &write_program);
-  write_program_init(pio0, sm_write, sm_write_offset);
 
   printf("wait for msg now\n");
 

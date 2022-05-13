@@ -9,18 +9,11 @@
 .define CDHRD 13
 
 public entry_point:
-    set pins, 0x3
 .wrap_target
-    pull block
-    out pins,16 ;output data
+    ;pull block
     wait 0 pin CDHRD ;wait for request to read
-    wait 0 pin CDHRD ;wait for request to read
-    wait 0 pin CDHRD ;wait for request to read
-    out pins, 16
-    wait 1 pin CDHRD
-    wait 1 pin CDHRD
-    wait 1 pin CDHRD [3] ;wait for end of request
-    pull block
+    out pins,8 ;output data
+    wait 1 pin CDHRD ;wait for end of request
 .wrap
 
 % c-sdk {
@@ -28,17 +21,14 @@ public entry_point:
 static inline void write_program_init(PIO pio, uint sm, uint offset) {
     pio_sm_config c = write_program_get_default_config(offset);
 
-    sm_config_set_out_pins(&c, 0, 32);
-    sm_config_set_out_shift(&c, true, false, 32);
-
-    pio_sm_set_consecutive_pindirs(pio, sm, CDSTEN, 2, true);
-
-    pio_sm_set_pins(pio, sm, (0x1<<CDDTEN)|(0x1<<CDSTEN));
+    sm_config_set_out_pins(&c, CDD0, 8);
+    sm_config_set_out_shift(&c, true, true, 8);
 
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
 
     // Load our configuration, and jump to the start of the program
     pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
 }
 
 %}
