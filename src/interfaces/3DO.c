@@ -145,61 +145,24 @@ uint32_t get3doData() {
   return val;
 }
 
-bool getIt() {
-  bool hasAnIt = ((pio0->irq & (1<<0)) != 0);
-  hw_set_bits(&pio0->irq, (1u << 0)); //clear interrupt
-  return hasAnIt;
-}
-
-bool shallInterrupt()
-{
-  if (getIt()) interrupt = true;
-  return interrupt;
-}
-
-void set3doRaw(uint32_t data, bool cdsten, bool outcdsten, bool cddten, bool outcddten, bool interruptible) {
-  // while (pio_sm_is_tx_fifo_full(pio0, sm_write) && !(shallInterrupt() && interruptible)) tight_loop_contents();
-  // if (interrupt && interruptible) {
-  //   // printf("It\n");
-  //   return;
-  // }
-  // pio_sm_put(pio0, sm_write, (cdsten << CDSTEN) | (cddten<<CDDTEN) |(data<<CDD0) | (((outcdsten << CDSTEN) | (outcddten<<CDDTEN) |(data<<CDD0))<<16));
-  // while (pio_sm_is_tx_fifo_full(pio0, sm_write) && !(shallInterrupt() && interruptible)) tight_loop_contents();
-  // if (interrupt && interruptible) {
-  //   return;
-  // }
-  // pio_sm_put(pio0, sm_write, 0x0);
-}
-
-
-void set3doData(uint32_t data, bool statusReady, bool continueData) {
-  // set3doRaw(data, !statusReady, !statusReady, 0, !continueData, true);
-}
-
-
-void initiateData(void) {
-  // pio_sm_clear_fifos(pio0, sm_write);
-  // while(!pio_sm_is_tx_fifo_empty(pio0, sm_write))
-  //   pio_sm_exec(pio0, sm_write, instr_pull);
-  // pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, true);
-  // gpio_put(CDDTEN, 0x0);
-}
-
-void closeRequestwithStatus() {
-  // set3doRaw(status, 0, 1, 1, 1, false);
-  // while (!pio_sm_is_tx_fifo_empty(pio0, sm_write)) tight_loop_contents();
-  // pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
-}
-
-void set3doInterruptStatus(uint32_t data) {
-  // getIt();
-  // set3doRaw(data, 0, 0, 0, 0, false);
-}
-
-void closeRequestwithInterruptedStatus() {
-  // set3doRaw(status, 0, 1, 0, 0, false);
-  // while (!pio_sm_is_tx_fifo_empty(pio0, sm_write)) tight_loop_contents();
-  // pio_sm_set_consecutive_pindirs(pio0, sm_write, CDD0, 8, false);
+void print_dma_ctrl(dma_channel_hw_t *channel) {
+    uint32_t ctrl = channel->ctrl_trig;
+    int rgsz = (ctrl & DMA_CH0_CTRL_TRIG_RING_SIZE_BITS) >> DMA_CH0_CTRL_TRIG_RING_SIZE_LSB;
+    printf("(%08x) ber %d rer %d wer %d busy %d trq %d cto %d rgsl %d rgsz %d inw %d inr %d sz %d hip %d en %d",
+           (uint) ctrl,
+           ctrl & DMA_CH0_CTRL_TRIG_AHB_ERROR_BITS ? 1 : 0,
+           ctrl & DMA_CH0_CTRL_TRIG_READ_ERROR_BITS ? 1 : 0,
+           ctrl & DMA_CH0_CTRL_TRIG_WRITE_ERROR_BITS ? 1 : 0,
+           ctrl & DMA_CH0_CTRL_TRIG_BUSY_BITS ? 1 : 0,
+           (int) ((ctrl & DMA_CH0_CTRL_TRIG_TREQ_SEL_BITS) >> DMA_CH0_CTRL_TRIG_TREQ_SEL_LSB),
+           (int) ((ctrl & DMA_CH0_CTRL_TRIG_CHAIN_TO_BITS) >> DMA_CH0_CTRL_TRIG_CHAIN_TO_LSB),
+           ctrl & DMA_CH0_CTRL_TRIG_RING_SEL_BITS ? 1 : 0,
+           rgsz ? (1 << rgsz) : 0,
+           ctrl & DMA_CH0_CTRL_TRIG_INCR_WRITE_BITS ? 1 : 0,
+           ctrl & DMA_CH0_CTRL_TRIG_INCR_READ_BITS ? 1 : 0,
+           1 << ((ctrl & DMA_CH0_CTRL_TRIG_DATA_SIZE_BITS) >> DMA_CH0_CTRL_TRIG_DATA_SIZE_LSB),
+           ctrl & DMA_CH0_CTRL_TRIG_HIGH_PRIORITY_BITS ? 1 : 0,
+           ctrl & DMA_CH0_CTRL_TRIG_EN_BITS ? 1 : 0);
 }
 
 void restartPio(uint8_t channel) {
@@ -518,7 +481,6 @@ void core1_entry() {
       while(gpio_get(CDEN)); //Attendre d'avoir le EN
       printf("CD is enabled now\n");
     }
-    getIt();
     reset_occured = false;
     data_in = get3doData();
     handleCommand(data_in);
