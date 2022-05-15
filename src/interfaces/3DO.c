@@ -13,9 +13,7 @@
 
 #define DATA_BUS_MASK (0xFF<<CDD0)
 
-#ifndef NO_READ_PIO
 #include "read.pio.h"
-#endif
 
 #include "write.pio.h"
 
@@ -135,13 +133,7 @@ void set3doDriveReady() {
 
 uint32_t get3doData() {
   uint32_t val = 0x0;
-#ifdef NO_READ_PIO
-  while(gpio_get(CDHWR) != 0);
-  val = gpio_get_all();
-  while(gpio_get(CDHWR) != 1);
-#else
   val = pio_sm_get_blocking(pio0, sm_read);
-#endif
   return val;
 }
 
@@ -537,11 +529,9 @@ void _3DO_init() {
     gpio_set_drive_strength(i, GPIO_DRIVE_STRENGTH_12MA);
   }
 
-#ifndef NO_READ_PIO
   sm_read = CHAN_MAX;
   offset = pio_add_program(pio0, &read_program);
   read_program_init(pio0, sm_read, offset);
-#endif
 
   pio_gpio_init(pio0, CDD0);
   pio_gpio_init(pio0, CDD1);
