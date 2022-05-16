@@ -184,7 +184,7 @@ void sendAnswer(uint8_t *buffer, uint32_t nbWord, uint8_t access) {
   pio_sm_set_enabled(pio0, sm[access], false);
 }
 
-void sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_status, uint8_t nbStatus) {
+void sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_status, uint8_t nbStatus, bool last) {
   bool statusStarted = false;
   bool interrupted = false;
   bool lastCDEN = gpio_get(CDEN);
@@ -199,7 +199,7 @@ void sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
         lastCDEN = !lastCDEN;
         pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_DATA], CDD0, 8, !lastCDEN);
     }
-    if((absolute_time_diff_us(start,get_absolute_time()) > 100) && (!statusStarted)) {
+    if((absolute_time_diff_us(start,get_absolute_time()) > 100) && (!statusStarted) && last) {
       statusStarted = true;
       gpio_put(CDSTEN, 0x0);
     }
@@ -214,7 +214,7 @@ void sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
   while(!pio_sm_is_tx_fifo_empty(pio0, sm[CHAN_WRITE_DATA]));
   while (pio_sm_get_pc(pio0, sm[CHAN_WRITE_DATA]) != sm_offset[CHAN_WRITE_DATA]);
   gpio_put(CDDTEN, 0x1);
-  if (!interrupted) sendAnswer(buffer_status, nbStatus, CHAN_WRITE_STATUS);
+  if (!interrupted && last) sendAnswer(buffer_status, nbStatus, CHAN_WRITE_STATUS);
   else pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_DATA], CDD0, 8, false);
   pio_sm_set_enabled(pio0, sm[CHAN_WRITE_DATA], false);
 }
