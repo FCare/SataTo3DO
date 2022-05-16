@@ -35,13 +35,16 @@ static bool read10_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t
   return true;
 }
 
+bool block_is_ready() {
+  return read_done;
+}
+
 bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer) {
   read_done = false;
   if ( !tuh_msc_read10(currentDisc.dev_addr, currentDisc.lun, buffer, start, nb_block, read10_complete_cb)) {
     printf("Got error with block read\n");
     return false;
   }
-  while (read_done == false);
   return true;
 }
 static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {

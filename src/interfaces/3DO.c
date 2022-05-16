@@ -18,6 +18,7 @@
 #include "write.pio.h"
 
 extern bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer);
+extern bool block_is_ready();
 
 #define GET_BUS(A) (((A)>>CDD0)&0xFF)
 
@@ -226,11 +227,19 @@ void sendData(int startlba, int nb_block) {
   int start = startlba;
 
   if (nb_block == 0) return;
+  uint8_t *buffer_out[2];
+  int id = 0;
+  buffer_out[0] = &buffer[0];
+  buffer_out[1] = &buffer[currentDisc.block_size];
+  readBlock(startlba, 1, buffer_out[0]);
   while (nb_block != 0) {
-    readBlock(startlba, 1, &buffer[0]);
+    int current = id;
+    while(!block_is_ready());
     nb_block--;
     startlba++;
-    sendAnswerStatusMixed(buffer, currentDisc.block_size, status_buffer, 2, nb_block == 0);
+    id = (id++)%2;
+    if (nb_block != 0) readBlock(startlba, 1, buffer_out[id]);
+    sendAnswerStatusMixed(buffer_out[current], currentDisc.block_size, status_buffer, 2, nb_block == 0);
   }
 }
 
