@@ -230,7 +230,7 @@ void sendData(int startlba, int nb_block) {
     readBlock(startlba, 1, &buffer[0]);
     nb_block--;
     startlba++;
-    sendAnswerStatusMixed(buffer, currentDisc.block_size, status_buffer, 2);
+    sendAnswerStatusMixed(buffer, currentDisc.block_size, status_buffer, 2, nb_block == 0);
   }
 }
 
