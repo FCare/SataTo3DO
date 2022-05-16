@@ -214,8 +214,9 @@ void sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
   while(!pio_sm_is_tx_fifo_empty(pio0, sm[CHAN_WRITE_DATA]));
   while (pio_sm_get_pc(pio0, sm[CHAN_WRITE_DATA]) != sm_offset[CHAN_WRITE_DATA]);
   gpio_put(CDDTEN, 0x1);
-  pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_DATA], CDD0, 8, false);
   if (!interrupted) sendAnswer(buffer_status, nbStatus, CHAN_WRITE_STATUS);
+  else pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_DATA], CDD0, 8, false);
+  pio_sm_set_enabled(pio0, sm[CHAN_WRITE_DATA], false);
 }
 
 void sendData(int startlba, int nb_block) {
@@ -333,9 +334,9 @@ void handleCommand(uint32_t data) {
         buffer[index++] = currentDisc.format;
         buffer[index++] = currentDisc.first_track;
         buffer[index++] = currentDisc.last_track;
-        buffer[index++] = currentDisc.msf[2];
-        buffer[index++] = currentDisc.msf[1];
         buffer[index++] = currentDisc.msf[0];
+        buffer[index++] = currentDisc.msf[1];
+        buffer[index++] = currentDisc.msf[2];
       } else {
         errorCode = NOT_READY;
         buffer[index++] = 0x0;
@@ -374,9 +375,9 @@ void handleCommand(uint32_t data) {
       if (currentDisc.multiSession) {
         //TBD with a multisession disc
         buffer[index++] = 0x80;
-        buffer[index++] = currentDisc.msf[2]; //might some other values like msf for multisession start
+        buffer[index++] = currentDisc.msf[0]; //might some other values like msf for multisession start
         buffer[index++] = currentDisc.msf[1];
-        buffer[index++] = currentDisc.msf[0];
+        buffer[index++] = currentDisc.msf[2];
         buffer[index++] = 0x0;
         buffer[index++] = 0x0;
       } else {
@@ -396,9 +397,9 @@ void handleCommand(uint32_t data) {
       }
       printf("READ_CAPACITY\n");
       buffer[index++] = READ_CAPACITY;
-      buffer[index++] = currentDisc.msf[2];
-      buffer[index++] = currentDisc.msf[1];
       buffer[index++] = currentDisc.msf[0];
+      buffer[index++] = currentDisc.msf[1];
+      buffer[index++] = currentDisc.msf[2];
       buffer[index++] = 0x0;
       buffer[index++] = 0x0;
       buffer[index++] = status;
