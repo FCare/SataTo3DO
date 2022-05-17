@@ -185,25 +185,49 @@ void sendAnswer(uint8_t *buffer, uint32_t nbWord, uint8_t access) {
   pio_sm_set_enabled(pio0, sm[access], false);
 }
 
-void sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_status, uint8_t nbStatus, bool last) {
+bool sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_status, uint8_t nbStatus, bool last, bool trace) {
   bool statusStarted = false;
   bool interrupted = false;
+  absolute_time_t a,b,c,d,e, s = get_absolute_time();
   bool lastCDEN = gpio_get(CDEN);
+  if (trace) a= get_absolute_time();
   restartPio(CHAN_WRITE_DATA);
+  if (trace) b= get_absolute_time();
   startDMA(CHAN_WRITE_DATA, buffer, nbWord);
+  if (trace) c= get_absolute_time();
   pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_DATA], CDD0, 8, true);
+  if (trace)  d= get_absolute_time();
   gpio_put(CDDTEN, 0x0);
+  if (trace) e= get_absolute_time();
   absolute_time_t start = get_absolute_time();
+  bool canBeInterrupted = false;
+
+  if (trace)
+    printf("a %lld, b %lld, c %lld, d %lld, e %lld\n", absolute_time_diff_us(s,a), absolute_time_diff_us(a,b), absolute_time_diff_us(b,c), absolute_time_diff_us(c,d), absolute_time_diff_us(d,e));
 
   while (dma_channel_is_busy(CHAN_WRITE_DATA)) {
     if (gpio_get(CDEN) != lastCDEN) {
         lastCDEN = !lastCDEN;
         pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_DATA], CDD0, 8, !lastCDEN);
     }
-    if((absolute_time_diff_us(start,get_absolute_time()) > 100) && (!statusStarted) && last) {
+    if((absolute_time_diff_us(start,get_absolute_time()) > 100) && (!statusStarted) && canBeInterrupted && last) {
       statusStarted = true;
       gpio_put(CDSTEN, 0x0);
     }
+
+    if (!gpio_get(CDEN)) {
+      start = get_absolute_time();
+      canBeInterrupted = true;
+    }
+
+    if (!gpio_get(CDHWR))
+    {
+      pio_sm_set_enabled(pio0, sm[CHAN_WRITE_DATA], false);
+      pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_DATA], CDD0, 8, false);
+      gpio_put(CDDTEN, true);
+      return false;
+    }
+
     if (gpio_get(CDEN) && statusStarted) {
       interrupted = true;
       pio_sm_set_enabled(pio0, sm[CHAN_WRITE_DATA], false);
@@ -218,28 +242,43 @@ void sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
   if (!interrupted && last) sendAnswer(buffer_status, nbStatus, CHAN_WRITE_STATUS);
   else pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_DATA], CDD0, 8, false);
   pio_sm_set_enabled(pio0, sm[CHAN_WRITE_DATA], false);
+  return true;
 }
+#define NB_BLOCK 1
+void sendData(int startlba, int nb_block, bool trace) {
 
-void sendData(int startlba, int nb_block) {
-
-  uint8_t buffer[2500];
+  uint8_t buffer[2500*NB_BLOCK];
   uint8_t status_buffer[2] = {READ_DATA, status};
   int start = startlba;
+  absolute_time_t a,b,c,d,e, s;
+
 
   if (nb_block == 0) return;
   uint8_t *buffer_out[2];
   int id = 0;
   buffer_out[0] = &buffer[0];
   buffer_out[1] = &buffer[currentDisc.block_size];
-  readBlock(startlba, 1, buffer_out[0]);
   while (nb_block != 0) {
+    s = get_absolute_time();
     int current = id;
-    while(!block_is_ready());
+    if (trace) a= get_absolute_time();
+    readBlock(startlba, NB_BLOCK, buffer_out[0]); //1block ~ 25 ms / 10 block ~ 25 ms
+    // printf("Block req\n");
+    if (trace) b= get_absolute_time();
+    while(!block_is_ready()); //1 block ~ 50 ms / 10 block ~ 68 ms / 20 block ~85 ms
+    // printf("Block done\n");
+    //10 blocks => best 25 + 68 / 10 => ~10ms/block
+    if (trace) c = get_absolute_time();
     nb_block--;
     startlba++;
     id = (id++)%2;
-    if (nb_block != 0) readBlock(startlba, 1, buffer_out[id]);
-    sendAnswerStatusMixed(buffer_out[current], currentDisc.block_size, status_buffer, 2, nb_block == 0);
+    // if (nb_block != 0) readBlock(startlba, 1, buffer_out[id]);
+    if (trace) d= get_absolute_time();
+    if (!sendAnswerStatusMixed(buffer_out[0], currentDisc.block_size, status_buffer, 2, nb_block == 0, trace)) return;
+    if (trace) e = get_absolute_time();
+    if (trace)
+      printf("send data a %lld, b %lld, c %lld, d %lld, e %lld\n", absolute_time_diff_us(s,a), absolute_time_diff_us(a,b), absolute_time_diff_us(b,c), absolute_time_diff_us(c,d), absolute_time_diff_us(d,e));
+
   }
 }
 
@@ -326,7 +365,7 @@ void handleCommand(uint32_t data) {
         //MSF
         int lba = data_in[0]*60*75+data_in[1]*75+data_in[2] - 150;
         int nb_block = (data_in[4]<<8)|data_in[5];
-        sendData(lba, nb_block);
+        sendData(lba, nb_block, false);
       } else {
         //LBA not supported yet
         printf("LBA not supported yet\n");
