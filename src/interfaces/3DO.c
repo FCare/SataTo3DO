@@ -401,15 +401,15 @@ void handleCommand(uint32_t data) {
       for (int i=0; i<6; i++) {
         data_in[i] = GET_BUS(get3doData());
       }
-      printf("READ_TOC %x\n", data_in[2]);
+      printf("READ_TOC %x\n", data_in[1]);
       buffer[index++] = READ_TOC;
       buffer[index++] = 0x0; //NixByte?
-      buffer[index++] = currentDisc.tracks[data_in[2]].CTRL_ADR; //ADDR
-      buffer[index++] = currentDisc.tracks[data_in[2]].id; //ENT_NUMBER
+      buffer[index++] = currentDisc.tracks[data_in[1]-1].CTRL_ADR; //ADDR
+      buffer[index++] = currentDisc.tracks[data_in[1]-1].id; //ENT_NUMBER
       buffer[index++] = 0x0;//Format
-      buffer[index++] = currentDisc.tracks[data_in[2]].msf[0];
-      buffer[index++] = currentDisc.tracks[data_in[2]].msf[1];
-      buffer[index++] = currentDisc.tracks[data_in[2]].msf[2];
+      buffer[index++] = currentDisc.tracks[data_in[1]-1].msf[0];
+      buffer[index++] = currentDisc.tracks[data_in[1]-1].msf[1];
+      buffer[index++] = currentDisc.tracks[data_in[1]-1].msf[2];
       buffer[index++] = 0x0;
       buffer[index++] = status;
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
