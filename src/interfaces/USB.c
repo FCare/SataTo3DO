@@ -48,12 +48,12 @@ bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer) {
   return true;
 }
 static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
-  currentDisc.nb_track = (((readBuffer[0]<<8)+readBuffer[1]) - 2)/8;
+  currentDisc.nb_track = ((readBuffer[0]<<8)+readBuffer[1] - 2)/8;
 
   currentDisc.first_track = readBuffer[2];
   currentDisc.last_track = readBuffer[3];
 
-  printf("First %d, last %d\n", currentDisc.first_track, currentDisc.last_track);
+  printf("First %d, last %d nb %x\n", currentDisc.first_track, currentDisc.last_track, currentDisc.nb_track);
   for (int i = 0; i < currentDisc.nb_track-1; i++) {
     int index = 4+8*i;
     //OxAA as id mean lead out
@@ -62,7 +62,7 @@ static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw
     currentDisc.tracks[i].msf[0] = readBuffer[index + 5]; //MSF
     currentDisc.tracks[i].msf[1] = readBuffer[index + 6];
     currentDisc.tracks[i].msf[2] = readBuffer[index + 7];
-    printf("Track[%d] 0x%x (0x%x)=> %d:%d:%d\n", i, currentDisc.tracks[i].id, currentDisc.tracks[i].CTRL_ADR, currentDisc.tracks[i].msf[0], currentDisc.tracks[i].msf[1], currentDisc.tracks[i].msf[0]);
+    printf("Track[%d] 0x%x (0x%x)=> %d:%d:%d\n", i, currentDisc.tracks[i].id, currentDisc.tracks[i].CTRL_ADR, currentDisc.tracks[i].msf[0], currentDisc.tracks[i].msf[1], currentDisc.tracks[i].msf[2]);
   }
   currentDisc.mounted = true;
   set3doCDReady(true);
