@@ -41,12 +41,20 @@ bool block_is_ready() {
 
 bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer) {
   read_done = false;
-  if ( !tuh_msc_read10(currentDisc.dev_addr, currentDisc.lun, buffer, start, nb_block, read10_complete_cb)) {
-    printf("Got error with block read\n");
-    return false;
+  if (currentDisc.block_size_read == 2048) {
+    if ( !tuh_msc_read10(currentDisc.dev_addr, currentDisc.lun, buffer, start, nb_block, read10_complete_cb)) {
+      printf("Got error with block read\n");
+      return false;
+    }
+  } else {
+    if ( !tuh_msc_read_cd(currentDisc.dev_addr, currentDisc.lun, buffer, start, nb_block, read10_complete_cb)) {
+      printf("Got error with block read\n");
+      return false;
+    }
   }
   return true;
 }
+
 static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   currentDisc.nb_track = ((readBuffer[0]<<8)+readBuffer[1] - 2)/8;
 
@@ -105,6 +113,7 @@ bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const
   // Get capacity of device
   currentDisc.nb_block = tuh_msc_get_block_count(dev_addr, cbw->lun);
   currentDisc.block_size = tuh_msc_get_block_size(dev_addr, cbw->lun);
+  currentDisc.block_size_read = currentDisc.block_size;
   currentDisc.dev_addr = dev_addr;
   currentDisc.lun = cbw->lun;
 

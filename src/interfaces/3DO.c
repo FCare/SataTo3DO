@@ -254,15 +254,13 @@ void sendData(int startlba, int nb_block, bool trace) {
 
 
   if (nb_block == 0) return;
-  uint8_t *buffer_out[2];
   int id = 0;
-  buffer_out[0] = &buffer[0];
-  buffer_out[1] = &buffer[currentDisc.block_size];
   while (nb_block != 0) {
     s = get_absolute_time();
     int current = id;
+    int data_idx = 0;
     if (trace) a= get_absolute_time();
-    readBlock(startlba, NB_BLOCK, buffer_out[0]); //1block ~ 25 ms / 10 block ~ 25 ms
+    readBlock(startlba, NB_BLOCK, &buffer[0]); //1block ~ 25 ms / 10 block ~ 25 ms
     // printf("Block req\n");
     if (trace) b= get_absolute_time();
     while(!block_is_ready()); //1 block ~ 50 ms / 10 block ~ 68 ms / 20 block ~85 ms
@@ -274,7 +272,7 @@ void sendData(int startlba, int nb_block, bool trace) {
     id = (id++)%2;
     // if (nb_block != 0) readBlock(startlba, 1, buffer_out[id]);
     if (trace) d= get_absolute_time();
-    if (!sendAnswerStatusMixed(buffer_out[0], currentDisc.block_size, status_buffer, 2, nb_block == 0, trace)) return;
+    if (!sendAnswerStatusMixed(&buffer[0], currentDisc.block_size_read, status_buffer, 2, nb_block == 0, trace)) return;
     if (trace) e = get_absolute_time();
     if (trace)
       printf("send data a %lld, b %lld, c %lld, d %lld, e %lld\n", absolute_time_diff_us(s,a), absolute_time_diff_us(a,b), absolute_time_diff_us(b,c), absolute_time_diff_us(c,d), absolute_time_diff_us(d,e));
@@ -457,13 +455,23 @@ void handleCommand(uint32_t data) {
         for (int i=0; i<6; i++) {
           data_in[i] = GET_BUS(get3doData());
         }
+        printf("SET_MODE\n");
         if (data_in[0] == 0x3) {
           if (data_in[1] & (0x80|0x40))
             status |= DOUBLE_SPEED;
           else
             status &= ~DOUBLE_SPEED;
         }
-        printf("SET_MODE\n");
+        if (data_in[0] == 0x0) {
+          currentDisc.block_size_read = (data_in[2]<<8)|(data_in[3]);
+          if (data_in[1] == 0x82) {
+            //sense byte for CD_FRAMESIZE_RAW (2352)
+            //need to be used to validate the command
+            currentDisc.block_size_read += 96; //Add subchannel
+            printf("RAW framesize\n");
+          }
+          printf("Block size to %d\n",currentDisc.block_size_read );
+        }
         buffer[index++] = SET_MODE;
         buffer[index++] = status;
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
