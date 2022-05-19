@@ -18,6 +18,7 @@
 #include "write.pio.h"
 
 extern bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer);
+extern bool readSubQChannel(uint8_t *buffer);
 extern bool block_is_ready();
 
 #define GET_BUS(A) (((A)>>CDD0)&0xFF)
@@ -32,6 +33,7 @@ typedef enum{
   READ_ERROR = 0x82,
   READ_ID    = 0x83,
   READ_CAPACITY = 0x85,
+  READ_SUB_Q = 0x87,
   READ_DISC_INFO = 0x8B,
   READ_TOC = 0x8C,
   READ_SESSION = 0x8D,
@@ -285,6 +287,7 @@ void handleCommand(uint32_t data) {
   bool isCmd = (data>>CDCMD)&0x1 == 0x0;
   uint32_t data_in[6];
   uint8_t buffer[12];
+  uint8_t subBuffer[16];
   uint index = 0;
 
   // pio0->irq  = 0;
@@ -446,7 +449,7 @@ void handleCommand(uint32_t data) {
       buffer[index++] = currentDisc.msf[0];
       buffer[index++] = currentDisc.msf[1];
       buffer[index++] = currentDisc.msf[2];
-      buffer[index++] = 0x0;
+      buffer[index++] = 0x0; //0x8?
       buffer[index++] = 0x0;
       buffer[index++] = status;
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
@@ -456,6 +459,50 @@ void handleCommand(uint32_t data) {
           data_in[i] = GET_BUS(get3doData());
         }
         printf("SET_MODE\n");
+        /*
+        not entirely full
+[18:04]
+cmd9 has many settings
+[18:04]
+[0] = 0x9
+[18:04]
+[1] = setting type
+[18:04]
+where :
+[18:04]
+0 = density
+[18:04]
+1 = error recovery
+[18:04]
+2 = stop time
+[18:05]
+3 = speed+pitch
+[18:05]
+4 = chunk size
+[18:06]
+density : [2] = density code, [3][4] = block length [5] = flags
+[18:06]
+error recovery : [2] = type [3] = retry count
+[18:07]
+stop time : [2] = time in 100ms
+[18:07]
+speed/pitch: [2]=speed [3][4] = pitch
+[18:09]
+chunk size : [2] = chunk size (1-8)
+
+fixel — Aujourd’hui à 18:17
+on density : [5] flags :
+[18:18]
+0x80 = 2353 bytes CDDA + error correction (modifié)
+[18:19]
+0x40 = 2448 bytes CDDA+subcode
+[18:19]
+0xc0 (0x80|0x40) = 2449 bytes : CDDA+subcode+error correction
+[18:19]
+0x00 : 2048
+[18:21]
+what's your reply to 0x83?
+*/
         if (data_in[0] == 0x3) {
           if (data_in[1] & (0x80|0x40))
             status |= DOUBLE_SPEED;
@@ -475,6 +522,28 @@ void handleCommand(uint32_t data) {
         buffer[index++] = SET_MODE;
         buffer[index++] = status;
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+        break;
+    case READ_SUB_Q:
+      for (int i=0; i<6; i++) {
+        data_in[i] = GET_BUS(get3doData());
+      }
+      printf("READ_SUB_Q\n");
+      buffer[index++] = READ_SUB_Q;
+      readSubQChannel(&subBuffer[0]);
+      while(!block_is_ready());
+
+      buffer[index++] = subBuffer[5]; //Ctrl/adr
+      buffer[index++] = subBuffer[6]; //trk
+      buffer[index++] = subBuffer[7]; //idx
+      buffer[index++] = 0;
+      buffer[index++] = subBuffer[9]; //total M
+      buffer[index++] = subBuffer[10]; //total S
+      buffer[index++] = subBuffer[11]; //total F
+      buffer[index++] = subBuffer[13]; //current M
+      buffer[index++] = subBuffer[14]; //current S
+      buffer[index++] = subBuffer[15]; //current F
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
         break;
     default: printf("unknown Cmd %x\n", request);
   }
