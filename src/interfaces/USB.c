@@ -39,6 +39,12 @@ bool block_is_ready() {
   return read_done;
 }
 
+void driveEject(bool eject) {
+  if ( !tuh_msc_start_stop(currentDisc.dev_addr, currentDisc.lun, !eject, false, true, NULL)) {
+    printf("Got error with block read\n");
+  }
+}
+
 bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer) {
   read_done = false;
   if (currentDisc.block_size_read == 2048) {

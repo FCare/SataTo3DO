@@ -19,6 +19,7 @@
 
 extern bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer);
 extern bool readSubQChannel(uint8_t *buffer);
+extern void driveEject(bool eject);
 extern bool block_is_ready();
 
 #define GET_BUS(A) (((A)>>CDD0)&0xFF)
@@ -27,6 +28,8 @@ extern cd_s currentDisc;
 
 typedef enum{
   SPIN_UP = 0x2,
+  EJECT_DISC = 0x6,
+  INJECT_DISC = 0x7,
   SET_MODE = 0x09,
   READ_DATA = 0x10,
   DATA_PATH_CHECK = 0x80,
@@ -312,6 +315,24 @@ void handleCommand(uint32_t data) {
       buffer[index++] = status;
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
+    case EJECT_DISC:
+      for (int i=0; i<6; i++) {
+        data_in[i] = get3doData();
+      }
+      printf("EJECT\n");
+      driveEject(true);
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case INJECT_DISC:
+        for (int i=0; i<6; i++) {
+          data_in[i] = get3doData();
+        }
+        printf("INJECT\n");
+        driveEject(false);
+        buffer[index++] = status;
+        sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+        break;
     case READ_ERROR:
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
