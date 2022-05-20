@@ -2,6 +2,11 @@
 #include "3DO.h"
 #include "pico/stdio.h"
 
+#if CFG_TUH_MSC
+static void check_eject();
+static void check_block();
+#endif
+
 void USB_Host_init() {
     stdio_init_all();
     tusb_init();
@@ -11,7 +16,10 @@ void USB_Host_loop()
 {
   // tinyusb host task
   tuh_task();
-
+#if CFG_TUH_MSC
+  check_block();
+  check_eject();
+#endif
 }
 
 
@@ -22,13 +30,25 @@ void USB_Host_loop()
 //--------------------------------------------------------------------+
 static scsi_inquiry_resp_t inquiry_resp;
 
+volatile static int8_t requestEject = -1;
+cd_s currentDisc = {0};
+
 volatile bool inquiry_cb_flag;
 
 uint8_t readBuffer[20480];
 
-cd_s currentDisc = {0};
 
 static volatile bool read_done;
+
+static void check_eject() {
+  if (!currentDisc.mounted && (requestEject!=-1)) {
+    //Execute right now
+    if ( !tuh_msc_start_stop(currentDisc.dev_addr, currentDisc.lun, requestEject, true, NULL)) {
+      printf("Got error while eject command\n");
+    }
+    requestEject = -1;
+  }
+}
 
 static bool read_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   read_done = true;
@@ -40,24 +60,44 @@ bool block_is_ready() {
 }
 
 void driveEject(bool eject) {
-  if ( !tuh_msc_start_stop(currentDisc.dev_addr, currentDisc.lun, !eject, false, true, NULL)) {
-    printf("Got error with block read\n");
+  if (currentDisc.mounted) {
+    //Execute right now
+    if ( !tuh_msc_start_stop(currentDisc.dev_addr, currentDisc.lun, !eject, true, NULL)) {
+      printf("Got error if eject command\n");
+    }
+  } else {
+    requestEject = (eject?0:1);
+  }
+}
+
+static uint32_t start_Block;
+static uint32_t nb_block_Block;
+static uint8_t *buffer_Block;
+static bool blockRequired = false;
+
+void check_block() {
+  if (blockRequired) {
+    blockRequired = false;
+    if (currentDisc.block_size_read == 2048) {
+      if ( !tuh_msc_read10(currentDisc.dev_addr, currentDisc.lun, buffer_Block, start_Block, nb_block_Block, read_complete_cb)) {
+        printf("Got error with block read\n");
+        return;
+      }
+    } else {
+      if ( !tuh_msc_read_cd(currentDisc.dev_addr, currentDisc.lun, buffer_Block, start_Block, nb_block_Block, read_complete_cb)) {
+        printf("Got error with block read\n");
+        return;
+      }
+    }
   }
 }
 
 bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer) {
   read_done = false;
-  if (currentDisc.block_size_read == 2048) {
-    if ( !tuh_msc_read10(currentDisc.dev_addr, currentDisc.lun, buffer, start, nb_block, read_complete_cb)) {
-      printf("Got error with block read\n");
-      return false;
-    }
-  } else {
-    if ( !tuh_msc_read_cd(currentDisc.dev_addr, currentDisc.lun, buffer, start, nb_block, read_complete_cb)) {
-      printf("Got error with block read\n");
-      return false;
-    }
-  }
+  start_Block = start;
+  nb_block_Block = nb_block;
+  buffer_Block = buffer;
+  blockRequired = true;
   return true;
 }
 

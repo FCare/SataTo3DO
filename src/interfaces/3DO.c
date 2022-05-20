@@ -108,6 +108,12 @@ volatile bool interrupt = false;
 uint8_t errorCode = POWER_OR_RESET_OCCURED;
 uint8_t status = DOOR_CLOSED;
 
+void close_tray(bool close) {
+  driveEject(!close);
+  status &= ~DOOR_CLOSED;
+  if (close) status |= DOOR_CLOSED;
+}
+
 void wait_out_of_reset() {
   while( !gpio_get(CDRST)) {
     gpio_put(CDMDCHG, 1); //Under reset
@@ -320,7 +326,7 @@ void handleCommand(uint32_t data) {
         data_in[i] = get3doData();
       }
       printf("EJECT\n");
-      driveEject(true);
+      close_tray(false);
       buffer[index++] = status;
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
@@ -329,7 +335,7 @@ void handleCommand(uint32_t data) {
           data_in[i] = get3doData();
         }
         printf("INJECT\n");
-        driveEject(false);
+        close_tray(true);
         buffer[index++] = status;
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
         break;
@@ -596,6 +602,7 @@ void core1_entry() {
 
   uint32_t data_in;
   bool reset_occured = true;
+  bool ejectState = gpio_get(EJECT);
 
   instr_out = pio_encode_out(pio_null, 16);
   instr_pull = pio_encode_pull(pio_null, 32);
@@ -626,6 +633,16 @@ void core1_entry() {
       while(gpio_get(CDEN)); //Attendre d'avoir le EN
       printf("CD is enabled now\n");
     }
+
+    bool ejectCurrent = gpio_get(EJECT);
+    if (ejectCurrent != ejectState) {
+      ejectState = ejectCurrent;
+      if (!ejectCurrent) {
+        //Eject button pressed, toggle tray position
+        close_tray((status & DOOR_CLOSED) == 0);
+      }
+    }
+
     reset_occured = false;
     data_in = get3doData();
     handleCommand(data_in);
@@ -645,6 +662,9 @@ void _3DO_init() {
 
   gpio_init(CDRST);
   gpio_set_dir(CDRST, false);
+
+  gpio_init(EJECT);
+  gpio_set_dir(EJECT, false);
 
   gpio_init(CDWAIT);
   gpio_put(CDWAIT, 1);  //CDWAIT is always 1
