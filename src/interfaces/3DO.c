@@ -109,6 +109,7 @@ uint8_t errorCode = POWER_OR_RESET_OCCURED;
 uint8_t status = DOOR_CLOSED;
 
 void close_tray(bool close) {
+  // printf("Close %d status %x \n", close, status & DOOR_CLOSED);
   driveEject(!close);
   status &= ~DOOR_CLOSED;
   if (close) status |= DOOR_CLOSED;
@@ -140,7 +141,11 @@ void set3doDriveMounted(bool on) {
 }
 
 void set3doDriveReady() {
-  status |= DOOR_CLOSED; //Stat drive is always close on start
+  // status |= DOOR_CLOSED; //Stat drive is always close on start
+}
+
+bool is3doData() {
+  return pio_sm_get_rx_fifo_level(pio0, sm_read) != 0;
 }
 
 uint32_t get3doData() {
@@ -638,14 +643,17 @@ void core1_entry() {
     if (ejectCurrent != ejectState) {
       ejectState = ejectCurrent;
       if (!ejectCurrent) {
+        // printf("Button Eject pressed\n");
         //Eject button pressed, toggle tray position
         close_tray((status & DOOR_CLOSED) == 0);
       }
     }
 
     reset_occured = false;
-    data_in = get3doData();
-    handleCommand(data_in);
+    if (is3doData()) {
+      data_in = get3doData();
+      handleCommand(data_in);
+    }
   }
 }
 
