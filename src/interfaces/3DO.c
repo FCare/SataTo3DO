@@ -720,14 +720,6 @@ void core1_entry() {
 
 void _3DO_init() {
   uint offset = -1;
-  // gpio_init_mask(DATA_MASK);
-  // gpio_init_mask(CTRL_MASK);
-  // gpio_init_mask(OUTPUT_MASK);
-  // gpio_set_dir_out_masked(OUTPUT_MASK);
-  //
-  // gpio_put(CDSTEN, 1); //CDSTEN is 1 when requested status is available and not read
-  // gpio_put(CDDTEN, 1); //CDDTEN is 1 when requested data is available and not read
-
 
   gpio_init(CDRST);
   gpio_set_dir(CDRST, false);
