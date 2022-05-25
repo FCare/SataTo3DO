@@ -109,9 +109,9 @@ uint8_t errorCode = POWER_OR_RESET_OCCURED;
 uint8_t status = DOOR_CLOSED | CHECK_ERROR;
 
 void close_tray(bool close) {
-  // printf("Close %d status %x \n", close, status & DOOR_CLOSED);
+  // LOG_SATA("Close %d status %x \n", close, status & DOOR_CLOSED);
   if (!driveEject(!close)) {
-    printf("Can not eject/inject\n");
+    LOG_SATA("Can not eject/inject\n");
     return;
   }
   status &= ~DOOR_CLOSED;
@@ -179,7 +179,7 @@ uint32_t get3doData() {
 void print_dma_ctrl(dma_channel_hw_t *channel) {
     uint32_t ctrl = channel->ctrl_trig;
     int rgsz = (ctrl & DMA_CH0_CTRL_TRIG_RING_SIZE_BITS) >> DMA_CH0_CTRL_TRIG_RING_SIZE_LSB;
-    printf("(%08x) ber %d rer %d wer %d busy %d trq %d cto %d rgsl %d rgsz %d inw %d inr %d sz %d hip %d en %d",
+    LOG_SATA("(%08x) ber %d rer %d wer %d busy %d trq %d cto %d rgsl %d rgsz %d inw %d inr %d sz %d hip %d en %d",
            (uint) ctrl,
            ctrl & DMA_CH0_CTRL_TRIG_AHB_ERROR_BITS ? 1 : 0,
            ctrl & DMA_CH0_CTRL_TRIG_READ_ERROR_BITS ? 1 : 0,
@@ -216,8 +216,8 @@ void sendAnswer(uint8_t *buffer, uint32_t nbWord, uint8_t access) {
   dma_channel_wait_for_finish_blocking(access);
   while(!pio_sm_is_tx_fifo_empty(pio0, sm[access]));
   while (pio_sm_get_pc(pio0, sm[access]) != sm_offset[access]);
-  // while (pio_sm_get_pc(pio0, sm[access]) != sm_offset[access]) printf("Pc %d\n",pio_sm_get_pc(pio0, sm[access]));
-  // while (pio_sm_get_pc(pio0, sm[access]) != sm_offset[access]) printf("Pc %d\n",pio_sm_get_pc(pio0, sm[access]));
+  // while (pio_sm_get_pc(pio0, sm[access]) != sm_offset[access]) LOG_SATA("Pc %d\n",pio_sm_get_pc(pio0, sm[access]));
+  // while (pio_sm_get_pc(pio0, sm[access]) != sm_offset[access]) LOG_SATA("Pc %d\n",pio_sm_get_pc(pio0, sm[access]));
   gpio_put(CDSTEN + access, 0x1);
   pio_sm_set_consecutive_pindirs(pio0, sm[access], CDD0, 8, false);
   pio_sm_set_enabled(pio0, sm[access], false);
@@ -241,7 +241,7 @@ bool sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
   bool canBeInterrupted = false;
 
   if (trace)
-    printf("a %lld, b %lld, c %lld, d %lld, e %lld\n", absolute_time_diff_us(s,a), absolute_time_diff_us(a,b), absolute_time_diff_us(b,c), absolute_time_diff_us(c,d), absolute_time_diff_us(d,e));
+    LOG_SATA("a %lld, b %lld, c %lld, d %lld, e %lld\n", absolute_time_diff_us(s,a), absolute_time_diff_us(a,b), absolute_time_diff_us(b,c), absolute_time_diff_us(c,d), absolute_time_diff_us(d,e));
 
   while (dma_channel_is_busy(CHAN_WRITE_DATA)) {
     if (gpio_get(CDEN) != lastCDEN) {
@@ -299,10 +299,10 @@ void sendData(int startlba, int nb_block, bool trace) {
     int data_idx = 0;
     if (trace) a= get_absolute_time();
     readBlock(startlba, NB_BLOCK, &buffer[0]); //1block ~ 25 ms / 10 block ~ 25 ms
-    // printf("Block req\n");
+    // LOG_SATA("Block req\n");
     if (trace) b= get_absolute_time();
     while(!block_is_ready()); //1 block ~ 50 ms / 10 block ~ 68 ms / 20 block ~85 ms
-    // printf("Block done\n");
+    // LOG_SATA("Block done\n");
     //10 blocks => best 25 + 68 / 10 => ~10ms/block
     if (trace) c = get_absolute_time();
     nb_block--;
@@ -313,10 +313,12 @@ void sendData(int startlba, int nb_block, bool trace) {
     if (!sendAnswerStatusMixed(&buffer[0], currentDisc.block_size_read, status_buffer, 2, nb_block == 0, trace)) return;
     if (trace) e = get_absolute_time();
     if (trace)
-      printf("send data a %lld, b %lld, c %lld, d %lld, e %lld\n", absolute_time_diff_us(s,a), absolute_time_diff_us(a,b), absolute_time_diff_us(b,c), absolute_time_diff_us(c,d), absolute_time_diff_us(d,e));
+      LOG_SATA("send data a %lld, b %lld, c %lld, d %lld, e %lld\n", absolute_time_diff_us(s,a), absolute_time_diff_us(a,b), absolute_time_diff_us(b,c), absolute_time_diff_us(c,d), absolute_time_diff_us(d,e));
 
   }
 }
+
+static bool ledState = false;
 
 void handleCommand(uint32_t data) {
   CD_request_t request = (CD_request_t) GET_BUS(data);
@@ -326,6 +328,11 @@ void handleCommand(uint32_t data) {
   uint8_t subBuffer[16];
   uint index = 0;
 
+#ifndef USE_UART_RX
+  gpio_set(LED, ledState);
+  ledState = !ledState;
+#endif
+
   // pio0->irq  = 0;
 
   switch(request) {
@@ -333,7 +340,7 @@ void handleCommand(uint32_t data) {
     for (int i=0; i<6; i++) {
       data_in[i] = get3doData();
     }
-      printf("READ ID\n");
+      LOG_SATA("READ ID\n");
       buffer[index++] = READ_ID;
       buffer[index++] =0x00; //manufacture Id
       buffer[index++] =0x10;
@@ -352,7 +359,7 @@ void handleCommand(uint32_t data) {
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
       }
-      printf("EJECT\n");
+      LOG_SATA("EJECT\n");
       close_tray(false);
       buffer[index++] = status;
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
@@ -361,7 +368,7 @@ void handleCommand(uint32_t data) {
         for (int i=0; i<6; i++) {
           data_in[i] = get3doData();
         }
-        printf("INJECT\n");
+        LOG_SATA("INJECT\n");
         close_tray(true);
         buffer[index++] = status;
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
@@ -370,7 +377,7 @@ void handleCommand(uint32_t data) {
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
       }
-      printf("READ ERROR\n");
+      LOG_SATA("READ ERROR\n");
       buffer[index++] = READ_ERROR;
       buffer[index++] = 0x00;
       buffer[index++] = 0x00;
@@ -389,7 +396,7 @@ void handleCommand(uint32_t data) {
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
       }
-      printf("DATA_PATH_CHECK\n");
+      LOG_SATA("DATA_PATH_CHECK\n");
       buffer[index++] = DATA_PATH_CHECK;
       buffer[index++] = 0xAA; //This means ok
       buffer[index++] = 0x55; //This means ok. Not the case when no disc
@@ -401,7 +408,7 @@ void handleCommand(uint32_t data) {
         for (int i=0; i<6; i++) {
           data_in[i] = get3doData();
         }
-        printf("SPIN UP\n");
+        LOG_SATA("SPIN UP\n");
         buffer[index++] = SPIN_UP;
         if (!(status & DOOR_CLOSED)) {
             status |= CHECK_ERROR;
@@ -423,7 +430,7 @@ void handleCommand(uint32_t data) {
         for (int i=0; i<6; i++) {
           data_in[i] = GET_BUS(get3doData());
         }
-        printf("READ DATA MSF %d:%d:%d\n", data_in[0], data_in[1], data_in[2]);
+        LOG_SATA("READ DATA MSF %d:%d:%d\n", data_in[0], data_in[1], data_in[2]);
         if (data_in[3] == 0x00) {
           //MSF
           int lba = data_in[0]*60*75+data_in[1]*75+data_in[2] - 150;
@@ -431,7 +438,7 @@ void handleCommand(uint32_t data) {
           sendData(lba, nb_block, false);
         } else {
           //LBA not supported yet
-          printf("LBA not supported yet\n");
+          LOG_SATA("LBA not supported yet\n");
         }
       }
       break;
@@ -440,7 +447,7 @@ void handleCommand(uint32_t data) {
         for (int i=0; i<6; i++) {
           data_in[i] = get3doData();
         }
-        printf("DISC_INFO\n");
+        LOG_SATA("DISC_INFO\n");
         buffer[index++] = READ_DISC_INFO;
         // LBA = (((M*60)+S)*75+F)-150
         if (currentDisc.mounted) {
@@ -468,7 +475,7 @@ void handleCommand(uint32_t data) {
         for (int i=0; i<6; i++) {
           data_in[i] = GET_BUS(get3doData());
         }
-        printf("READ_TOC %x\n", data_in[1]);
+        LOG_SATA("READ_TOC %x\n", data_in[1]);
         buffer[index++] = READ_TOC;
         buffer[index++] = 0x0; //NixByte?
         buffer[index++] = currentDisc.tracks[data_in[1]-1].CTRL_ADR; //ADDR
@@ -487,7 +494,7 @@ void handleCommand(uint32_t data) {
         for (int i=0; i<6; i++) {
           data_in[i] = get3doData();
         }
-        printf("READ_SESSION\n");
+        LOG_SATA("READ_SESSION\n");
         buffer[index++] = READ_SESSION;
         if (currentDisc.multiSession) {
           //TBD with a multisession disc
@@ -514,7 +521,7 @@ void handleCommand(uint32_t data) {
         for (int i=0; i<6; i++) {
           data_in[i] = get3doData();
         }
-        printf("READ_CAPACITY\n");
+        LOG_SATA("READ_CAPACITY\n");
         buffer[index++] = READ_CAPACITY;
         buffer[index++] = currentDisc.msf[0];
         buffer[index++] = currentDisc.msf[1];
@@ -529,7 +536,7 @@ void handleCommand(uint32_t data) {
         for (int i=0; i<6; i++) {
           data_in[i] = GET_BUS(get3doData());
         }
-        printf("SET_MODE\n");
+        LOG_SATA("SET_MODE\n");
         /*
         not entirely full
 [18:04]
@@ -586,9 +593,9 @@ what's your reply to 0x83?
             //sense byte for CD_FRAMESIZE_RAW (2352)
             //need to be used to validate the command
             currentDisc.block_size_read += 96; //Add subchannel
-            printf("RAW framesize\n");
+            LOG_SATA("RAW framesize\n");
           }
-          printf("Block size to %d\n",currentDisc.block_size_read );
+          LOG_SATA("Block size to %d\n",currentDisc.block_size_read );
         }
         buffer[index++] = SET_MODE;
         buffer[index++] = status;
@@ -599,7 +606,7 @@ what's your reply to 0x83?
         for (int i=0; i<6; i++) {
           data_in[i] = GET_BUS(get3doData());
         }
-        printf("READ_SUB_Q\n");
+        LOG_SATA("READ_SUB_Q\n");
         buffer[index++] = READ_SUB_Q;
         readSubQChannel(&subBuffer[0]);
         while(!block_is_ready());
@@ -618,7 +625,7 @@ what's your reply to 0x83?
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       }
         break;
-    default: printf("unknown Cmd %x\n", request);
+    default: LOG_SATA("unknown Cmd %x\n", request);
   }
 }
 
@@ -641,7 +648,7 @@ void pio_program_init(int channel) {
   sm_offset[channel] = pio_add_program(pio0, &write_program);
   write_program_init(pio0, sm[channel], sm_offset[channel]);
   instr_jmp[channel] = pio_encode_jmp(sm_offset[channel]);
-  printf("Prog %d offset %d\n", channel, sm_offset[channel]);
+  LOG_SATA("Prog %d offset %d\n", channel, sm_offset[channel]);
 }
 
 static absolute_time_t s;
@@ -668,7 +675,7 @@ void core1_entry() {
 
   // pio_sm_set_enabled(pio0, sm_write, true);
 
-  printf("Ready\n");
+  LOG_SATA("Ready\n");
   while (1){
     if (!gpio_get(CDRST)) {
       reset_occured = true;
@@ -680,9 +687,9 @@ void core1_entry() {
       status |= CHECK_ERROR;
     }
     if (gpio_get(CDEN)) {
-      printf("CD is not enabled\n");
+      LOG_SATA("CD is not enabled\n");
       while(gpio_get(CDEN)); //Attendre d'avoir le EN
-      printf("CD is enabled now\n");
+      LOG_SATA("CD is enabled now\n");
     }
 
     bool ejectCurrent = gpio_get(EJECT);
@@ -692,7 +699,7 @@ void core1_entry() {
         if (absolute_time_diff_us(s, get_absolute_time()) > 2000) {
           //Effective
           ejectState = ejectCurrent;
-          // printf("Button Eject pressed\n");
+          // LOG_SATA("Button Eject pressed\n");
           //Eject button pressed, toggle tray position
           if (!ejectCurrent) {
             close_tray((status & DOOR_CLOSED) == 0);
@@ -750,6 +757,11 @@ void _3DO_init() {
   gpio_set_dir(CDDTEN, true);
   // gpio_set_pulls(CDDTEN, false, true);
 
+#ifndef USE_UART_RX
+  gpio_init(LED);
+  gpio_set_dir(LED, true);
+#endif
+
 
   gpio_init(CDHRD);
   gpio_set_dir(CDHRD, false);
@@ -777,11 +789,11 @@ void _3DO_init() {
   pio_gpio_init(pio0, CDD6);
   pio_gpio_init(pio0, CDD7);
 
-  printf("wait for msg now\n");
+  LOG_SATA("wait for msg now\n");
 
 
   int clock = clock_get_hz(clk_sys);
-  printf("Clock is %d\n", clock);
+  LOG_SATA("Clock is %d\n", clock);
 
   multicore_launch_core1(core1_entry);
 }

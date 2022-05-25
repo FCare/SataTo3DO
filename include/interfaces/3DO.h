@@ -56,7 +56,12 @@
 
 #ifndef USE_UART_RX
 #define OUTPUT_MASK (OUTPUT_MASK | (1<<LED))
+#define LOG_SATA printf
+#else
+#define LOG_SATA
 #endif
+
+
 
 typedef struct {
   uint8_t id;

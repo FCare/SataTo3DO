@@ -66,12 +66,12 @@ static bool command_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_
 
 static bool check_eject() {
   if (requestEject!=-1) {
-    // printf("Eject requested %d\n", requestEject);
+    // LOG_SATA("Eject requested %d\n", requestEject);
     usb_state |= COMMAND_ON_GOING;
     //Execute right now
-    printf("Eject %d\n", requestEject);
+    LOG_SATA("Eject %d\n", requestEject);
     if ( !tuh_msc_start_stop(currentDisc.dev_addr, currentDisc.lun, requestEject, true, command_complete_cb)) {
-      printf("Got error while eject command\n");
+      LOG_SATA("Got error while eject command\n");
     }
     else {
       if (requestEject == 0) {
@@ -128,12 +128,12 @@ void check_block() {
     blockRequired = false;
     if (currentDisc.block_size_read == 2048) {
       if ( !tuh_msc_read10(currentDisc.dev_addr, currentDisc.lun, buffer_Block, start_Block, nb_block_Block, read_complete_cb)) {
-        printf("Got error with block read\n");
+        LOG_SATA("Got error with block read\n");
         return;
       }
     } else {
       if ( !tuh_msc_read_cd(currentDisc.dev_addr, currentDisc.lun, buffer_Block, start_Block, nb_block_Block, read_complete_cb)) {
-        printf("Got error with block read\n");
+        LOG_SATA("Got error with block read\n");
         return;
       }
     }
@@ -154,7 +154,7 @@ bool readSubQChannel(uint8_t *buffer) {
   read_done = false;
   usb_state |= COMMAND_ON_GOING;
   if (!tuh_msc_read_sub_channel(currentDisc.dev_addr, currentDisc.lun, buffer, read_complete_cb)) {
-    printf("Got error with sub Channel read\n");
+    LOG_SATA("Got error with sub Channel read\n");
     return false;
   }
   return true;
@@ -168,7 +168,7 @@ static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw
   currentDisc.first_track = readBuffer[2];
   currentDisc.last_track = readBuffer[3];
 
-  printf("First %d, last %d nb %x\n", currentDisc.first_track, currentDisc.last_track, currentDisc.nb_track);
+  LOG_SATA("First %d, last %d nb %x\n", currentDisc.first_track, currentDisc.last_track, currentDisc.nb_track);
   for (int i = 0; i < currentDisc.nb_track-1; i++) {
     int index = 4+8*i;
     //OxAA as id mean lead out
@@ -177,7 +177,7 @@ static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw
     currentDisc.tracks[i].msf[0] = readBuffer[index + 5]; //MSF
     currentDisc.tracks[i].msf[1] = readBuffer[index + 6];
     currentDisc.tracks[i].msf[2] = readBuffer[index + 7];
-    printf("Track[%d] 0x%x (0x%x)=> %d:%d:%d\n", i, currentDisc.tracks[i].id, currentDisc.tracks[i].CTRL_ADR, currentDisc.tracks[i].msf[0], currentDisc.tracks[i].msf[1], currentDisc.tracks[i].msf[2]);
+    LOG_SATA("Track[%d] 0x%x (0x%x)=> %d:%d:%d\n", i, currentDisc.tracks[i].id, currentDisc.tracks[i].CTRL_ADR, currentDisc.tracks[i].msf[0], currentDisc.tracks[i].msf[1], currentDisc.tracks[i].msf[2]);
   }
   currentDisc.mounted = true;
   usb_state |= DISC_MOUNTED;
@@ -192,11 +192,11 @@ static bool read_toc_light_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, m
   currentDisc.first_track = readBuffer[2];
   currentDisc.last_track = readBuffer[3];
 
-  printf("First %d, last %d nbTrack %d\n", currentDisc.first_track, currentDisc.last_track, currentDisc.nb_track);
+  LOG_SATA("First %d, last %d nbTrack %d\n", currentDisc.first_track, currentDisc.last_track, currentDisc.nb_track);
 
   if (currentDisc.nb_track != 0) {
     if (!tuh_msc_read_toc(dev_addr, cbw->lun, readBuffer, 1, 0, currentDisc.nb_track, read_toc_complete_cb)) {
-        printf("Got error with toc read\n");
+        LOG_SATA("Got error with toc read\n");
         return false;
     }
   } else {
@@ -210,13 +210,13 @@ bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const
   inquiry_cb_flag = true;
   if (csw->status != 0)
   {
-    printf("Inquiry failed\r\n");
+    LOG_SATA("Inquiry failed\r\n");
     //Quel status pour la 3DO?
     return false;
   }
 
   // Print out Vendor ID, Product ID and Rev
-  printf("%.8s %.16s rev %.4s Type 0x%x Lun %d\r\n", inquiry_resp.vendor_id, inquiry_resp.product_id, inquiry_resp.product_rev, inquiry_resp.peripheral_device_type, cbw->lun);
+  LOG_SATA("%.8s %.16s rev %.4s Type 0x%x Lun %d\r\n", inquiry_resp.vendor_id, inquiry_resp.product_id, inquiry_resp.product_rev, inquiry_resp.peripheral_device_type, cbw->lun);
 
   // Get capacity of device
   currentDisc.nb_block = tuh_msc_get_block_count(dev_addr, cbw->lun);
@@ -233,12 +233,12 @@ bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const
   //Assume type is CD-DA or CD-ROM always
   currentDisc.format = 0x0; /*00 CD-DA or CD-ROM / 10 CD-I / 20 XA */
 
-  printf("Disk Size: %lu MB\r\n", currentDisc.nb_block / ((1024*1024)/currentDisc.block_size));
-  printf("Block Count = %lu, Block Size: %lu\r\n", currentDisc.nb_block, currentDisc.block_size);
-  printf("Disc duration is %2d:%2d:%2d\n", currentDisc.msf[0], currentDisc.msf[1], currentDisc.msf[2]);
+  LOG_SATA("Disk Size: %lu MB\r\n", currentDisc.nb_block / ((1024*1024)/currentDisc.block_size));
+  LOG_SATA("Block Count = %lu, Block Size: %lu\r\n", currentDisc.nb_block, currentDisc.block_size);
+  LOG_SATA("Disc duration is %2d:%2d:%2d\n", currentDisc.msf[0], currentDisc.msf[1], currentDisc.msf[2]);
 
   if (!tuh_msc_read_toc(dev_addr, cbw->lun, readBuffer, 1, 0, 0, read_toc_light_complete_cb)) {
-      printf("Got error with toc read\n");
+      LOG_SATA("Got error with toc read\n");
       return false;
   }
   return true;
@@ -263,7 +263,7 @@ void tuh_msc_mount_cb(uint8_t dev_addr)
 {
   uint8_t const lun = 0;
   usb_state |= COMMAND_ON_GOING;
-  printf("A USB MassStorage device is mounted\r\n");
+  LOG_SATA("A USB MassStorage device is mounted\r\n");
   inquiry_cb_flag = false;
   tuh_msc_inquiry(dev_addr, lun, &inquiry_resp, inquiry_complete_cb);
 }
@@ -271,7 +271,7 @@ void tuh_msc_mount_cb(uint8_t dev_addr)
 void tuh_msc_umount_cb(uint8_t dev_addr)
 {
   (void) dev_addr;
-  printf("A USB MassStorage device is unmounted\r\n");
+  LOG_SATA("A USB MassStorage device is unmounted\r\n");
   set3doCDReady(false);
   set3doDriveMounted(false);
   currentDisc.mounted = false;
