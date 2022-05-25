@@ -581,6 +581,7 @@ on density : [5] flags :
 [18:21]
 what's your reply to 0x83?
 */
+
         if (data_in[0] == 0x3) {
           if (data_in[1] & (0x80|0x40))
             status |= DOUBLE_SPEED;
@@ -589,11 +590,14 @@ what's your reply to 0x83?
         }
         if (data_in[0] == 0x0) {
           currentDisc.block_size_read = (data_in[2]<<8)|(data_in[3]);
-          if (data_in[1] == 0x82) {
-            //sense byte for CD_FRAMESIZE_RAW (2352)
-            //need to be used to validate the command
-            currentDisc.block_size_read += 96; //Add subchannel
-            LOG_SATA("RAW framesize\n");
+          if (data_in[5] == 0x40) {
+            currentDisc.block_size_read = 2353; //CDDA + error correction
+          }
+          if (data_in[5] == 0x80) {
+            currentDisc.block_size_read = 2448; //CDDA+subcode
+          }
+          if (data_in[5] == 0xC0) {
+            currentDisc.block_size_read = 2449; //CDDA+subcode+error correction
           }
           LOG_SATA("Block size to %d\n",currentDisc.block_size_read );
         }

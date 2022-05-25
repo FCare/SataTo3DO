@@ -160,9 +160,17 @@ bool readSubQChannel(uint8_t *buffer) {
   return true;
 }
 
+static bool read_header_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
+  usb_state &= ~COMMAND_ON_GOING;
+  if (readBuffer[0] != 0) currentDisc.format = 0x1; //Only CD-ROM, CD-DA and CD-XA are supported
+  currentDisc.mounted = true;
+  usb_state |= DISC_MOUNTED;
+  set3doCDReady(true);
+  set3doDriveMounted(true);
+  return true;
+}
 
 static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
-  usb_state &= ~COMMAND_ON_GOING;
   currentDisc.nb_track = ((readBuffer[0]<<8)+readBuffer[1] - 2)/8;
 
   currentDisc.first_track = readBuffer[2];
@@ -179,10 +187,12 @@ static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw
     currentDisc.tracks[i].msf[2] = readBuffer[index + 7];
     LOG_SATA("Track[%d] 0x%x (0x%x)=> %d:%d:%d\n", i, currentDisc.tracks[i].id, currentDisc.tracks[i].CTRL_ADR, currentDisc.tracks[i].msf[0], currentDisc.tracks[i].msf[1], currentDisc.tracks[i].msf[2]);
   }
-  currentDisc.mounted = true;
-  usb_state |= DISC_MOUNTED;
-  set3doCDReady(true);
-  set3doDriveMounted(true);
+
+  uint32_t first_track = currentDisc.tracks[0].msf[0]*60*75+currentDisc.tracks[0].msf[1]*75+currentDisc.tracks[0].msf[2] - 150;
+  if (!tuh_msc_read_header(dev_addr, cbw->lun, readBuffer, first_track, read_header_complete_cb)) {
+      LOG_SATA("Got error with header read\n");
+      return false;
+  }
   return true;
 }
 
