@@ -19,7 +19,7 @@
 
 extern bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer);
 extern bool readSubQChannel(uint8_t *buffer);
-extern void driveEject(bool eject);
+extern bool driveEject(bool eject);
 extern bool block_is_ready();
 
 #define GET_BUS(A) (((A)>>CDD0)&0xFF)
@@ -106,13 +106,35 @@ uint nbWord = 0;
 volatile bool interrupt = false;
 
 uint8_t errorCode = POWER_OR_RESET_OCCURED;
-uint8_t status = DOOR_CLOSED;
+uint8_t status = DOOR_CLOSED | CHECK_ERROR;
 
 void close_tray(bool close) {
   // printf("Close %d status %x \n", close, status & DOOR_CLOSED);
-  driveEject(!close);
+  if (!driveEject(!close)) {
+    printf("Can not eject/inject\n");
+    return;
+  }
   status &= ~DOOR_CLOSED;
-  if (close) status |= DOOR_CLOSED;
+  if (close) {
+    gpio_set_dir(CDRST, true);
+    gpio_put(CDRST, 0);
+    gpio_put(CDMDCHG, 1); //Under reset
+    sleep_ms(200);
+    gpio_put(CDRST, 1);
+    gpio_set_dir(CDRST, false);
+    sleep_ms(150);
+    gpio_put(CDMDCHG, 0); //Under reset
+    sleep_ms(10);
+    gpio_put(CDMDCHG, 1); //Under reset
+    sleep_ms(6);
+    gpio_put(CDMDCHG, 0); //Under reset
+    status |= DOOR_CLOSED | CHECK_ERROR;
+    errorCode |= POWER_OR_RESET_OCCURED;
+  } else {
+    currentDisc.mounted = false;
+    status |= CHECK_ERROR;
+    errorCode |= DISC_REMOVED;
+  }
 }
 
 void wait_out_of_reset() {
@@ -375,116 +397,133 @@ void handleCommand(uint32_t data) {
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
     case SPIN_UP:
-      for (int i=0; i<6; i++) {
-        data_in[i] = get3doData();
+      if (currentDisc.mounted) {
+        for (int i=0; i<6; i++) {
+          data_in[i] = get3doData();
+        }
+        printf("SPIN UP\n");
+        buffer[index++] = SPIN_UP;
+        if (!(status & DOOR_CLOSED)) {
+            status |= CHECK_ERROR;
+            errorCode |= ILLEGAL_CMD;
+        } else {
+          if (!(status & DISK_OK)) {
+            status |= CHECK_ERROR;
+            errorCode |= DISC_REMOVED;
+          } else {
+            status |= SPINNING;
+          }
+        }
+        buffer[index++] = status;
+        sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       }
-      printf("SPIN UP\n");
-      buffer[index++] = SPIN_UP;
-      if (!(status & DISK_OK)) {
-        status |= CHECK_ERROR;
-        errorCode |= DISC_REMOVED;
-      } else {
-        status |= SPINNING;
-      }
-      buffer[index++] = status;
-      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
     case READ_DATA:
-      for (int i=0; i<6; i++) {
-        data_in[i] = GET_BUS(get3doData());
-      }
-      printf("READ DATA MSF %d:%d:%d\n", data_in[0], data_in[1], data_in[2]);
-      if (data_in[3] == 0x00) {
-        //MSF
-        int lba = data_in[0]*60*75+data_in[1]*75+data_in[2] - 150;
-        int nb_block = (data_in[4]<<8)|data_in[5];
-        sendData(lba, nb_block, false);
-      } else {
-        //LBA not supported yet
-        printf("LBA not supported yet\n");
+      if (currentDisc.mounted) {
+        for (int i=0; i<6; i++) {
+          data_in[i] = GET_BUS(get3doData());
+        }
+        printf("READ DATA MSF %d:%d:%d\n", data_in[0], data_in[1], data_in[2]);
+        if (data_in[3] == 0x00) {
+          //MSF
+          int lba = data_in[0]*60*75+data_in[1]*75+data_in[2] - 150;
+          int nb_block = (data_in[4]<<8)|data_in[5];
+          sendData(lba, nb_block, false);
+        } else {
+          //LBA not supported yet
+          printf("LBA not supported yet\n");
+        }
       }
       break;
     case READ_DISC_INFO:
-      for (int i=0; i<6; i++) {
-        data_in[i] = get3doData();
-      }
-      printf("DISC_INFO\n");
-      buffer[index++] = READ_DISC_INFO;
-      // LBA = (((M*60)+S)*75+F)-150
       if (currentDisc.mounted) {
-        buffer[index++] = currentDisc.format;
-        buffer[index++] = currentDisc.first_track;
-        buffer[index++] = currentDisc.last_track;
+        for (int i=0; i<6; i++) {
+          data_in[i] = get3doData();
+        }
+        printf("DISC_INFO\n");
+        buffer[index++] = READ_DISC_INFO;
+        // LBA = (((M*60)+S)*75+F)-150
+        if (currentDisc.mounted) {
+          buffer[index++] = currentDisc.format;
+          buffer[index++] = currentDisc.first_track;
+          buffer[index++] = currentDisc.last_track;
+          buffer[index++] = currentDisc.msf[0];
+          buffer[index++] = currentDisc.msf[1];
+          buffer[index++] = currentDisc.msf[2];
+        } else {
+          errorCode = NOT_READY;
+          buffer[index++] = 0x0;
+          buffer[index++] = 0x0;
+          buffer[index++] = 0x0;
+          buffer[index++] = 0x0;
+          buffer[index++] = 0x0;
+          buffer[index++] = 0x0;
+        }
+        buffer[index++] = status;
+        sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      }
+      break;
+    case READ_TOC:
+      if (currentDisc.mounted) {
+        for (int i=0; i<6; i++) {
+          data_in[i] = GET_BUS(get3doData());
+        }
+        printf("READ_TOC %x\n", data_in[1]);
+        buffer[index++] = READ_TOC;
+        buffer[index++] = 0x0; //NixByte?
+        buffer[index++] = currentDisc.tracks[data_in[1]-1].CTRL_ADR; //ADDR
+        buffer[index++] = currentDisc.tracks[data_in[1]-1].id; //ENT_NUMBER
+        buffer[index++] = 0x0;//Format
+        buffer[index++] = currentDisc.tracks[data_in[1]-1].msf[0];
+        buffer[index++] = currentDisc.tracks[data_in[1]-1].msf[1];
+        buffer[index++] = currentDisc.tracks[data_in[1]-1].msf[2];
+        buffer[index++] = 0x0;
+        buffer[index++] = status;
+        sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      }
+      break;
+    case READ_SESSION:
+      if (currentDisc.mounted) {
+        for (int i=0; i<6; i++) {
+          data_in[i] = get3doData();
+        }
+        printf("READ_SESSION\n");
+        buffer[index++] = READ_SESSION;
+        if (currentDisc.multiSession) {
+          //TBD with a multisession disc
+          buffer[index++] = 0x80;
+          buffer[index++] = currentDisc.msf[0]; //might some other values like msf for multisession start
+          buffer[index++] = currentDisc.msf[1];
+          buffer[index++] = currentDisc.msf[2];
+          buffer[index++] = 0x0;
+          buffer[index++] = 0x0;
+        } else {
+          buffer[index++] = 0x0;
+          buffer[index++] = 0x0;
+          buffer[index++] = 0x0;
+          buffer[index++] = 0x0;
+          buffer[index++] = 0x0;
+          buffer[index++] = 0x0;
+        }
+        buffer[index++] = status;
+        sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      }
+    break;
+    case READ_CAPACITY:
+      if (currentDisc.mounted) {
+        for (int i=0; i<6; i++) {
+          data_in[i] = get3doData();
+        }
+        printf("READ_CAPACITY\n");
+        buffer[index++] = READ_CAPACITY;
         buffer[index++] = currentDisc.msf[0];
         buffer[index++] = currentDisc.msf[1];
         buffer[index++] = currentDisc.msf[2];
-      } else {
-        errorCode = NOT_READY;
+        buffer[index++] = 0x0; //0x8?
         buffer[index++] = 0x0;
-        buffer[index++] = 0x0;
-        buffer[index++] = 0x0;
-        buffer[index++] = 0x0;
-        buffer[index++] = 0x0;
-        buffer[index++] = 0x0;
+        buffer[index++] = status;
+        sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       }
-      buffer[index++] = status;
-      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
-      break;
-    case READ_TOC:
-      for (int i=0; i<6; i++) {
-        data_in[i] = GET_BUS(get3doData());
-      }
-      printf("READ_TOC %x\n", data_in[1]);
-      buffer[index++] = READ_TOC;
-      buffer[index++] = 0x0; //NixByte?
-      buffer[index++] = currentDisc.tracks[data_in[1]-1].CTRL_ADR; //ADDR
-      buffer[index++] = currentDisc.tracks[data_in[1]-1].id; //ENT_NUMBER
-      buffer[index++] = 0x0;//Format
-      buffer[index++] = currentDisc.tracks[data_in[1]-1].msf[0];
-      buffer[index++] = currentDisc.tracks[data_in[1]-1].msf[1];
-      buffer[index++] = currentDisc.tracks[data_in[1]-1].msf[2];
-      buffer[index++] = 0x0;
-      buffer[index++] = status;
-      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
-      break;
-    case READ_SESSION:
-      for (int i=0; i<6; i++) {
-        data_in[i] = get3doData();
-      }
-      printf("READ_SESSION\n");
-      buffer[index++] = READ_SESSION;
-      if (currentDisc.multiSession) {
-        //TBD with a multisession disc
-        buffer[index++] = 0x80;
-        buffer[index++] = currentDisc.msf[0]; //might some other values like msf for multisession start
-        buffer[index++] = currentDisc.msf[1];
-        buffer[index++] = currentDisc.msf[2];
-        buffer[index++] = 0x0;
-        buffer[index++] = 0x0;
-      } else {
-        buffer[index++] = 0x0;
-        buffer[index++] = 0x0;
-        buffer[index++] = 0x0;
-        buffer[index++] = 0x0;
-        buffer[index++] = 0x0;
-        buffer[index++] = 0x0;
-      }
-      buffer[index++] = status;
-      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
-    break;
-    case READ_CAPACITY:
-      for (int i=0; i<6; i++) {
-        data_in[i] = get3doData();
-      }
-      printf("READ_CAPACITY\n");
-      buffer[index++] = READ_CAPACITY;
-      buffer[index++] = currentDisc.msf[0];
-      buffer[index++] = currentDisc.msf[1];
-      buffer[index++] = currentDisc.msf[2];
-      buffer[index++] = 0x0; //0x8?
-      buffer[index++] = 0x0;
-      buffer[index++] = status;
-      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
       case SET_MODE:
         for (int i=0; i<6; i++) {
@@ -556,26 +595,28 @@ what's your reply to 0x83?
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
         break;
     case READ_SUB_Q:
-      for (int i=0; i<6; i++) {
-        data_in[i] = GET_BUS(get3doData());
-      }
-      printf("READ_SUB_Q\n");
-      buffer[index++] = READ_SUB_Q;
-      readSubQChannel(&subBuffer[0]);
-      while(!block_is_ready());
+    if (currentDisc.mounted) {
+        for (int i=0; i<6; i++) {
+          data_in[i] = GET_BUS(get3doData());
+        }
+        printf("READ_SUB_Q\n");
+        buffer[index++] = READ_SUB_Q;
+        readSubQChannel(&subBuffer[0]);
+        while(!block_is_ready());
 
-      buffer[index++] = subBuffer[5]; //Ctrl/adr
-      buffer[index++] = subBuffer[6]; //trk
-      buffer[index++] = subBuffer[7]; //idx
-      buffer[index++] = 0;
-      buffer[index++] = subBuffer[9]; //total M
-      buffer[index++] = subBuffer[10]; //total S
-      buffer[index++] = subBuffer[11]; //total F
-      buffer[index++] = subBuffer[13]; //current M
-      buffer[index++] = subBuffer[14]; //current S
-      buffer[index++] = subBuffer[15]; //current F
-      buffer[index++] = status;
-      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+        buffer[index++] = subBuffer[5]; //Ctrl/adr
+        buffer[index++] = subBuffer[6]; //trk
+        buffer[index++] = subBuffer[7]; //idx
+        buffer[index++] = 0;
+        buffer[index++] = subBuffer[9]; //total M
+        buffer[index++] = subBuffer[10]; //total S
+        buffer[index++] = subBuffer[11]; //total F
+        buffer[index++] = subBuffer[13]; //current M
+        buffer[index++] = subBuffer[14]; //current S
+        buffer[index++] = subBuffer[15]; //current F
+        buffer[index++] = status;
+        sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      }
         break;
     default: printf("unknown Cmd %x\n", request);
   }
@@ -602,6 +643,9 @@ void pio_program_init(int channel) {
   instr_jmp[channel] = pio_encode_jmp(sm_offset[channel]);
   printf("Prog %d offset %d\n", channel, sm_offset[channel]);
 }
+
+static absolute_time_t s;
+static bool debounceEject = false;
 
 void core1_entry() {
 
@@ -632,6 +676,8 @@ void core1_entry() {
       // set_3D0_interface_read(false);
       // set_3D0_interface_write(false);
       wait_out_of_reset();
+      errorCode |= POWER_OR_RESET_OCCURED;
+      status |= CHECK_ERROR;
     }
     if (gpio_get(CDEN)) {
       printf("CD is not enabled\n");
@@ -641,12 +687,20 @@ void core1_entry() {
 
     bool ejectCurrent = gpio_get(EJECT);
     if (ejectCurrent != ejectState) {
-      ejectState = ejectCurrent;
-      if (!ejectCurrent) {
-        // printf("Button Eject pressed\n");
-        //Eject button pressed, toggle tray position
-        close_tray((status & DOOR_CLOSED) == 0);
-      }
+        if (!debounceEject) s = get_absolute_time();
+        debounceEject = true;
+        if (absolute_time_diff_us(s, get_absolute_time()) > 2000) {
+          //Effective
+          ejectState = ejectCurrent;
+          // printf("Button Eject pressed\n");
+          //Eject button pressed, toggle tray position
+          if (!ejectCurrent) {
+            close_tray((status & DOOR_CLOSED) == 0);
+          }
+          debounceEject = false;
+        }
+    } else {
+        if (debounceEject && (absolute_time_diff_us(s, get_absolute_time()) > 2000)) debounceEject = false;
     }
 
     reset_occured = false;

@@ -69,10 +69,19 @@ static bool check_eject() {
     // printf("Eject requested %d\n", requestEject);
     usb_state |= COMMAND_ON_GOING;
     //Execute right now
+    printf("Eject %d\n", requestEject);
     if ( !tuh_msc_start_stop(currentDisc.dev_addr, currentDisc.lun, requestEject, true, command_complete_cb)) {
       printf("Got error while eject command\n");
     }
-    else requestEject = -1;
+    else {
+      if (requestEject == 0) {
+        set3doCDReady(false);
+        set3doDriveMounted(false);
+        currentDisc.mounted = false;
+        usb_state &= ~DISC_MOUNTED;
+      }
+      requestEject = -1;
+    }
     return true;
   }
   return false;
@@ -98,8 +107,14 @@ bool block_is_ready() {
   return read_done;
 }
 
-void driveEject(bool eject) {
+bool driveEject(bool eject) {
+  if (!usb_state & ENUMERATED) {
+    requestEject = (eject?0:1);
+    return true;
+  }
+  if (requestEject != -1) return false;
   requestEject = (eject?0:1);
+  return true;
 }
 
 static uint32_t start_Block;
@@ -260,6 +275,7 @@ void tuh_msc_umount_cb(uint8_t dev_addr)
   set3doCDReady(false);
   set3doDriveMounted(false);
   currentDisc.mounted = false;
+  usb_state &= ~DISC_MOUNTED;
 }
 
 #endif
