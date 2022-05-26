@@ -284,20 +284,18 @@ bool sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
   return true;
 }
 #define NB_BLOCK 1
+absolute_time_t lastPacket;
 void sendData(int startlba, int nb_block, bool trace) {
 
   uint8_t buffer[2500*NB_BLOCK];
   uint8_t status_buffer[2] = {READ_DATA, status};
   int start = startlba;
   absolute_time_t a,b,c,d,e, s;
-  absolute_time_t lastPacket = 0;
-  bool multipleBlock = (nb_block > 1);
   uint8_t reste = 1;
 
 
   if (nb_block == 0) return;
   int id = 0;
-  bool needWait = false;
   while (nb_block != 0) {
     s = get_absolute_time();
     int current = id;
@@ -308,16 +306,18 @@ void sendData(int startlba, int nb_block, bool trace) {
     if (trace) b= get_absolute_time();
     while(!block_is_ready()); //1 block ~ 50 ms / 10 block ~ 68 ms / 20 block ~85 ms
 
-    if (isAudioBlock(startlba) && multipleBlock && needWait) {
-      absolute_time_t currentPacket = get_absolute_time();
-      int64_t delay = absolute_time_diff_us(currentPacket, lastPacket); /*Right number shall be 1000000/75*/
-      printf("Sleep %lld\n", delay);
-      if (delay>0) sleep_us(delay);
-      lastPacket = delayed_by_us(lastPacket,13333) + reste/3;
-      reste = (reste%3)+1;
+    if (isAudioBlock(startlba)) {
+      if (is_nil_time(lastPacket)) {
+        lastPacket = delayed_by_us(get_absolute_time(),13333);
+      } else {
+        absolute_time_t currentPacket = get_absolute_time();
+        int64_t delay = absolute_time_diff_us(currentPacket, lastPacket); /*Right number shall be 1000000/75*/
+        if (delay>0) sleep_us(delay);
+        else lastPacket = currentPacket;
+        lastPacket = delayed_by_us(lastPacket,13333) + reste/3;
+        reste = (reste%3)+1;
+      }
     }
-    if (multipleBlock && !needWait) lastPacket = delayed_by_us(get_absolute_time(),13333);
-    needWait = true;
     // LOG_SATA("Block done\n");
     //10 blocks => best 25 + 68 / 10 => ~10ms/block
     if (trace) c = get_absolute_time();
@@ -682,6 +682,8 @@ void core1_entry() {
   uint32_t data_in;
   bool reset_occured = true;
   bool ejectState = gpio_get(EJECT);
+
+  lastPacket = nil_time;
 
   instr_out = pio_encode_out(pio_null, 16);
   instr_pull = pio_encode_pull(pio_null, 32);
