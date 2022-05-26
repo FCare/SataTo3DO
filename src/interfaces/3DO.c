@@ -309,12 +309,12 @@ void sendData(int startlba, int nb_block, bool trace) {
 
     if (isAudioBlock(startlba) && multipleBlock && needWait) {
       absolute_time_t currentPacket = get_absolute_time();
-      uint64_t delay = absolute_time_diff_us(currentPacket, lastPacket); /*Right number shall be 1000000/75*/
+      int64_t delay = absolute_time_diff_us(currentPacket, lastPacket); /*Right number shall be 1000000/75*/
       printf("Sleep %lld\n", delay);
-      if (currentPacket < lastPacket) sleep_us(delay);
-      lastPacket = currentPacket + 13333;
+      if (delay>0) sleep_us(delay);
+      lastPacket = delayed_by_us(lastPacket,13333);
     }
-    if (multipleBlock && !needWait) lastPacket = get_absolute_time()+13333;
+    if (multipleBlock && !needWait) lastPacket = delayed_by_us(get_absolute_time(),13333);
     needWait = true;
     // LOG_SATA("Block done\n");
     //10 blocks => best 25 + 68 / 10 => ~10ms/block
