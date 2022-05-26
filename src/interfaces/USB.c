@@ -4,6 +4,7 @@
 
 #if CFG_TUH_MSC
 static bool check_eject();
+static void check_speed();
 static void check_block();
 static void check_mount();
 #endif
@@ -32,6 +33,7 @@ void USB_Host_loop()
     if (!(usb_state & COMMAND_ON_GOING)) {
       if (!check_eject()) {
         if (usb_state & DISC_MOUNTED) {
+          check_speed();
           check_block();
         } else {
           check_mount();
@@ -59,6 +61,8 @@ uint8_t readBuffer[20480];
 
 
 static volatile bool read_done;
+static volatile bool is_audio;
+static volatile bool has_subQ;
 
 static bool command_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   usb_state &= ~COMMAND_ON_GOING;
@@ -121,18 +125,20 @@ static uint32_t start_Block;
 static uint32_t nb_block_Block;
 static uint8_t *buffer_Block;
 static bool blockRequired = false;
+static uint16_t CDSpeed;
+static bool speedChange = false;
 
 void check_block() {
   if (blockRequired) {
     usb_state |= COMMAND_ON_GOING;
     blockRequired = false;
-    if (currentDisc.block_size_read == 2048) {
+    if (!is_audio) {
       if ( !tuh_msc_read10(currentDisc.dev_addr, currentDisc.lun, buffer_Block, start_Block, nb_block_Block, read_complete_cb)) {
         LOG_SATA("Got error with block read\n");
         return;
       }
     } else {
-      if ( !tuh_msc_read_cd(currentDisc.dev_addr, currentDisc.lun, buffer_Block, start_Block, nb_block_Block, read_complete_cb)) {
+      if ( !tuh_msc_read_cd(currentDisc.dev_addr, currentDisc.lun, buffer_Block, start_Block, nb_block_Block, has_subQ, read_complete_cb)) {
         LOG_SATA("Got error with block read\n");
         return;
       }
@@ -140,12 +146,47 @@ void check_block() {
   }
 }
 
-bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer) {
+bool isAudioBlock(uint32_t start) {
+  bool res = false;
+  for (int i = 0; i < currentDisc.nb_track-1; i++) {
+    if (currentDisc.tracks[i].lba <= start) {
+      res = ((currentDisc.tracks[i].CTRL_ADR & 0x4) == 0x0);
+    }
+  }
+  return res;
+}
+
+bool readBlock(uint32_t start, uint16_t nb_block, uint8_t block_size, uint8_t *buffer) {
+  is_audio = false;
+  has_subQ = false;
   read_done = false;
   start_Block = start;
   nb_block_Block = nb_block;
   buffer_Block = buffer;
+  for (int i = 0; i < currentDisc.nb_track-1; i++) {
+    if (currentDisc.tracks[i].lba <= start) {
+      is_audio = ((currentDisc.tracks[i].CTRL_ADR & 0x4) == 0x0);
+      has_subQ = (block_size >= 2448);
+    }
+  }
   blockRequired = true;
+  return true;
+}
+
+void check_speed() {
+  if (speedChange) {
+    usb_state |= COMMAND_ON_GOING;
+    speedChange = false;
+    if ( !tuh_msc_set_speed(currentDisc.dev_addr, currentDisc.lun, CDSpeed, 0xFFFF, read_complete_cb)) {
+      LOG_SATA("Got error with block read\n");
+      return;
+    }
+  }
+}
+
+bool setCDSpeed(uint16_t speed) {
+  CDSpeed = speed;
+  speedChange = true;
   return true;
 }
 
@@ -162,7 +203,10 @@ bool readSubQChannel(uint8_t *buffer) {
 
 static bool read_header_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   usb_state &= ~COMMAND_ON_GOING;
-  if (readBuffer[0] != 0) currentDisc.format = 0x1; //Only CD-ROM, CD-DA and CD-XA are supported
+  if (readBuffer[0] == 0x2) {
+    /* 00h - audio; 01h - Mode 1 (games) - Mode 2 (CD-XA photoCD) */
+    currentDisc.format = 0x20; //Only CD-ROM, CD-DA and CD-XA are supported
+  }
   currentDisc.mounted = true;
   usb_state |= DISC_MOUNTED;
   set3doCDReady(true);
@@ -176,7 +220,7 @@ static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw
   currentDisc.first_track = readBuffer[2];
   currentDisc.last_track = readBuffer[3];
 
-  LOG_SATA("First %d, last %d nb %x\n", currentDisc.first_track, currentDisc.last_track, currentDisc.nb_track);
+  LOG_SATA("First %d, last %d nb %d\n", currentDisc.first_track, currentDisc.last_track, currentDisc.nb_track);
   for (int i = 0; i < currentDisc.nb_track-1; i++) {
     int index = 4+8*i;
     //OxAA as id mean lead out
@@ -185,13 +229,19 @@ static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw
     currentDisc.tracks[i].msf[0] = readBuffer[index + 5]; //MSF
     currentDisc.tracks[i].msf[1] = readBuffer[index + 6];
     currentDisc.tracks[i].msf[2] = readBuffer[index + 7];
+    currentDisc.tracks[i].lba = currentDisc.tracks[i].msf[0]*60*75+currentDisc.tracks[i].msf[1]*75+currentDisc.tracks[i].msf[2] - 150;
     LOG_SATA("Track[%d] 0x%x (0x%x)=> %d:%d:%d\n", i, currentDisc.tracks[i].id, currentDisc.tracks[i].CTRL_ADR, currentDisc.tracks[i].msf[0], currentDisc.tracks[i].msf[1], currentDisc.tracks[i].msf[2]);
   }
 
   uint32_t first_track = currentDisc.tracks[0].msf[0]*60*75+currentDisc.tracks[0].msf[1]*75+currentDisc.tracks[0].msf[2] - 150;
-  if (!tuh_msc_read_header(dev_addr, cbw->lun, readBuffer, first_track, read_header_complete_cb)) {
+  if (currentDisc.tracks[0].CTRL_ADR & 0x4) {
+    if (!tuh_msc_read_header(dev_addr, cbw->lun, readBuffer, first_track, read_header_complete_cb)) {
       LOG_SATA("Got error with header read\n");
       return false;
+    }
+  } else {
+    readBuffer[0] = 0x0;
+    read_header_complete_cb(dev_addr, cbw, csw);
   }
   return true;
 }
@@ -204,8 +254,8 @@ static bool read_toc_light_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, m
 
   LOG_SATA("First %d, last %d nbTrack %d\n", currentDisc.first_track, currentDisc.last_track, currentDisc.nb_track);
 
-  if (currentDisc.nb_track != 0) {
-    if (!tuh_msc_read_toc(dev_addr, cbw->lun, readBuffer, 1, 0, currentDisc.nb_track, read_toc_complete_cb)) {
+  if (currentDisc.nb_track > 1) {
+    if (!tuh_msc_read_toc(dev_addr, cbw->lun, readBuffer, 1, 0, currentDisc.nb_track-1, read_toc_complete_cb)) {
         LOG_SATA("Got error with toc read\n");
         return false;
     }

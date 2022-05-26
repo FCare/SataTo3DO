@@ -17,10 +17,11 @@
 
 #include "write.pio.h"
 
-extern bool readBlock(uint32_t start, uint16_t nb_block, uint8_t *buffer);
+extern bool readBlock(uint32_t start, uint16_t nb_block, uint8_t block_size, uint8_t *buffer);
 extern bool readSubQChannel(uint8_t *buffer);
 extern bool driveEject(bool eject);
 extern bool block_is_ready();
+extern bool isAudioBlock(uint32_t start);
 
 #define GET_BUS(A) (((A)>>CDD0)&0xFF)
 
@@ -289,19 +290,32 @@ void sendData(int startlba, int nb_block, bool trace) {
   uint8_t status_buffer[2] = {READ_DATA, status};
   int start = startlba;
   absolute_time_t a,b,c,d,e, s;
+  absolute_time_t lastPacket = 0;
+  bool multipleBlock = (nb_block > 1);
 
 
   if (nb_block == 0) return;
   int id = 0;
+  bool needWait = false;
   while (nb_block != 0) {
     s = get_absolute_time();
     int current = id;
     int data_idx = 0;
     if (trace) a= get_absolute_time();
-    readBlock(startlba, NB_BLOCK, &buffer[0]); //1block ~ 25 ms / 10 block ~ 25 ms
+    readBlock(startlba, NB_BLOCK, currentDisc.block_size_read, &buffer[0]); //1block ~ 25 ms / 10 block ~ 25 ms
     // LOG_SATA("Block req\n");
     if (trace) b= get_absolute_time();
     while(!block_is_ready()); //1 block ~ 50 ms / 10 block ~ 68 ms / 20 block ~85 ms
+
+    if (isAudioBlock(startlba) && multipleBlock && needWait) {
+      absolute_time_t currentPacket = get_absolute_time();
+      uint64_t delay = absolute_time_diff_us(currentPacket, lastPacket); /*Right number shall be 1000000/75*/
+      printf("Sleep %lld\n", delay);
+      if (currentPacket < lastPacket) sleep_us(delay);
+      lastPacket = currentPacket + 13333;
+    }
+    if (multipleBlock && !needWait) lastPacket = get_absolute_time()+13333;
+    needWait = true;
     // LOG_SATA("Block done\n");
     //10 blocks => best 25 + 68 / 10 => ~10ms/block
     if (trace) c = get_absolute_time();
@@ -536,7 +550,7 @@ void handleCommand(uint32_t data) {
         for (int i=0; i<6; i++) {
           data_in[i] = GET_BUS(get3doData());
         }
-        LOG_SATA("SET_MODE\n");
+        LOG_SATA("SET_MODE %x %x %x %x %x %x\n", data_in[0], data_in[1], data_in[2], data_in[3], data_in[4], data_in[5]);
         /*
         not entirely full
 [18:04]
@@ -583,20 +597,23 @@ what's your reply to 0x83?
 */
 
         if (data_in[0] == 0x3) {
-          if (data_in[1] & (0x80|0x40))
+          if (data_in[1] & (0x80|0x40)) {
             status |= DOUBLE_SPEED;
-          else
+            // setCDSpeed(0xFFFF);
+          } else {
             status &= ~DOUBLE_SPEED;
+            // setCDSpeed(176); //Simple speed is 150kb/s. Required for audio
+          }
         }
         if (data_in[0] == 0x0) {
           currentDisc.block_size_read = (data_in[2]<<8)|(data_in[3]);
-          if (data_in[5] == 0x40) {
+          if ((data_in[4] & 0xC0) == 0x80) {
             currentDisc.block_size_read = 2353; //CDDA + error correction
           }
-          if (data_in[5] == 0x80) {
+          if ((data_in[4] & 0xC0) == 0x40) {
             currentDisc.block_size_read = 2448; //CDDA+subcode
           }
-          if (data_in[5] == 0xC0) {
+          if ((data_in[4] & 0xC0) == 0xC0) {
             currentDisc.block_size_read = 2449; //CDDA+subcode+error correction
           }
           LOG_SATA("Block size to %d\n",currentDisc.block_size_read );
