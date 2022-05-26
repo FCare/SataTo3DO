@@ -292,6 +292,7 @@ void sendData(int startlba, int nb_block, bool trace) {
   absolute_time_t a,b,c,d,e, s;
   absolute_time_t lastPacket = 0;
   bool multipleBlock = (nb_block > 1);
+  uint8_t reste = 1;
 
 
   if (nb_block == 0) return;
@@ -312,7 +313,8 @@ void sendData(int startlba, int nb_block, bool trace) {
       int64_t delay = absolute_time_diff_us(currentPacket, lastPacket); /*Right number shall be 1000000/75*/
       printf("Sleep %lld\n", delay);
       if (delay>0) sleep_us(delay);
-      lastPacket = delayed_by_us(lastPacket,13333);
+      lastPacket = delayed_by_us(lastPacket,13333) + reste/3;
+      reste = (reste%3)+1;
     }
     if (multipleBlock && !needWait) lastPacket = delayed_by_us(get_absolute_time(),13333);
     needWait = true;
