@@ -35,6 +35,7 @@ void USB_Host_loop()
         if (usb_state & DISC_MOUNTED) {
           check_speed();
           check_block();
+          check_subq();
         } else {
           check_mount();
         }
@@ -127,6 +128,9 @@ static bool blockRequired = false;
 static uint16_t CDSpeed;
 static bool speedChange = false;
 
+static bool subqRequired = false;
+static uint8_t *buffer_subq;
+
 void check_block() {
   if (blockRequired) {
     usb_state |= COMMAND_ON_GOING;
@@ -143,6 +147,18 @@ void check_block() {
       }
     }
   }
+}
+
+void check_subq() {
+  if (subqRequired) {
+    usb_state |= COMMAND_ON_GOING;
+    subqRequired = false;
+    if (!tuh_msc_read_sub_channel(currentDisc.dev_addr, currentDisc.lun, buffer_subq, read_complete_cb)) {
+      LOG_SATA("Got error with sub Channel read\n");
+      return false;
+    }
+  }
+  return true;
 }
 
 bool isAudioBlock(uint32_t start) {
@@ -190,12 +206,9 @@ bool setCDSpeed(uint16_t speed) {
 }
 
 bool readSubQChannel(uint8_t *buffer) {
+  buffer_subq = buffer;
   read_done = false;
-  usb_state |= COMMAND_ON_GOING;
-  if (!tuh_msc_read_sub_channel(currentDisc.dev_addr, currentDisc.lun, buffer, read_complete_cb)) {
-    LOG_SATA("Got error with sub Channel read\n");
-    return false;
-  }
+  subqRequired = true;
   return true;
 }
 
