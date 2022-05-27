@@ -70,7 +70,6 @@ static bool command_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_
 
 static bool check_eject() {
   if (requestEject!=-1) {
-    // LOG_SATA("Eject requested %d\n", requestEject);
     usb_state |= COMMAND_ON_GOING;
     //Execute right now
     LOG_SATA("Eject %d\n", requestEject);
@@ -191,7 +190,6 @@ bool setCDSpeed(uint16_t speed) {
 }
 
 bool readSubQChannel(uint8_t *buffer) {
-  //FAire async
   read_done = false;
   usb_state |= COMMAND_ON_GOING;
   if (!tuh_msc_read_sub_channel(currentDisc.dev_addr, currentDisc.lun, buffer, read_complete_cb)) {
@@ -271,7 +269,6 @@ bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const
   if (csw->status != 0)
   {
     LOG_SATA("Inquiry failed\r\n");
-    //Quel status pour la 3DO?
     return false;
   }
 

@@ -110,7 +110,6 @@ uint8_t errorCode = POWER_OR_RESET_OCCURED;
 uint8_t status = DOOR_CLOSED | CHECK_ERROR;
 
 void close_tray(bool close) {
-  // LOG_SATA("Close %d status %x \n", close, status & DOOR_CLOSED);
   if (!driveEject(!close)) {
     LOG_SATA("Can not eject/inject\n");
     return;
@@ -164,7 +163,6 @@ void set3doDriveMounted(bool on) {
 }
 
 void set3doDriveReady() {
-  // status |= DOOR_CLOSED; //Stat drive is always close on start
 }
 
 bool is3doData() {
@@ -217,8 +215,6 @@ void sendAnswer(uint8_t *buffer, uint32_t nbWord, uint8_t access) {
   dma_channel_wait_for_finish_blocking(access);
   while(!pio_sm_is_tx_fifo_empty(pio0, sm[access]));
   while (pio_sm_get_pc(pio0, sm[access]) != sm_offset[access]);
-  // while (pio_sm_get_pc(pio0, sm[access]) != sm_offset[access]) LOG_SATA("Pc %d\n",pio_sm_get_pc(pio0, sm[access]));
-  // while (pio_sm_get_pc(pio0, sm[access]) != sm_offset[access]) LOG_SATA("Pc %d\n",pio_sm_get_pc(pio0, sm[access]));
   gpio_put(CDSTEN + access, 0x1);
   pio_sm_set_consecutive_pindirs(pio0, sm[access], CDD0, 8, false);
   pio_sm_set_enabled(pio0, sm[access], false);
@@ -302,10 +298,9 @@ void sendData(int startlba, int nb_block, bool trace) {
     int data_idx = 0;
     if (trace) a= get_absolute_time();
     if (!currentDisc.mounted) return;
-    readBlock(startlba, NB_BLOCK, currentDisc.block_size_read, &buffer[0]); //1block ~ 25 ms / 10 block ~ 25 ms
-    // LOG_SATA("Block req\n");
+    readBlock(startlba, NB_BLOCK, currentDisc.block_size_read, &buffer[0]);
     if (trace) b= get_absolute_time();
-    while(!block_is_ready()); //1 block ~ 50 ms / 10 block ~ 68 ms / 20 block ~85 ms
+    while(!block_is_ready());
 
     if (isAudioBlock(startlba)) {
       if (is_nil_time(lastPacket)) {
@@ -319,13 +314,10 @@ void sendData(int startlba, int nb_block, bool trace) {
         reste = (reste%3)+1;
       }
     }
-    // LOG_SATA("Block done\n");
-    //10 blocks => best 25 + 68 / 10 => ~10ms/block
     if (trace) c = get_absolute_time();
     nb_block--;
     startlba++;
     id = (id++)%2;
-    // if (nb_block != 0) readBlock(startlba, 1, buffer_out[id]);
     if (trace) d= get_absolute_time();
     if (!sendAnswerStatusMixed(&buffer[0], currentDisc.block_size_read, status_buffer, 2, nb_block == 0, trace)) return;
     if (trace) e = get_absolute_time();
@@ -349,8 +341,6 @@ void handleCommand(uint32_t data) {
   gpio_set(LED, ledState);
   ledState = !ledState;
 #endif
-
-  // pio0->irq  = 0;
 
   switch(request) {
     case READ_ID:
@@ -602,10 +592,8 @@ what's your reply to 0x83?
         if (data_in[0] == 0x3) {
           if (data_in[1] & (0x80|0x40)) {
             status |= DOUBLE_SPEED;
-            // setCDSpeed(0xFFFF);
           } else {
             status &= ~DOUBLE_SPEED;
-            // setCDSpeed(176); //Simple speed is 150kb/s. Required for audio
           }
         }
         if (data_in[0] == 0x0) {
@@ -689,32 +677,24 @@ void core1_entry() {
   instr_out = pio_encode_out(pio_null, 16);
   instr_pull = pio_encode_pull(pio_null, 32);
   instr_set = pio_encode_set(pio_pins, 0b11);
-  // instr_restart = pio_encode_jmp(sm_write_offset);
-  // init_3DO_read_interface();
-  // init_3DO_write_interface();
 
   for (int i = 0; i< CHAN_MAX; i++) {
     pio_program_init(i);
     setupDMA(i);
   }
 
-
-  // pio_sm_set_enabled(pio0, sm_write, true);
-
   LOG_SATA("Ready\n");
   while (1){
     if (!gpio_get(CDRST)) {
       reset_occured = true;
 
-      // set_3D0_interface_read(false);
-      // set_3D0_interface_write(false);
       wait_out_of_reset();
       errorCode |= POWER_OR_RESET_OCCURED;
       status |= CHECK_ERROR;
     }
     if (gpio_get(CDEN)) {
       LOG_SATA("CD is not enabled\n");
-      while(gpio_get(CDEN)); //Attendre d'avoir le EN
+      while(gpio_get(CDEN));
       LOG_SATA("CD is enabled now\n");
     }
 
@@ -723,9 +703,7 @@ void core1_entry() {
         if (!debounceEject) s = get_absolute_time();
         debounceEject = true;
         if (absolute_time_diff_us(s, get_absolute_time()) > 2000) {
-          //Effective
           ejectState = ejectCurrent;
-          // LOG_SATA("Button Eject pressed\n");
           //Eject button pressed, toggle tray position
           if (!ejectCurrent) {
             close_tray((status & DOOR_CLOSED) == 0);
@@ -768,12 +746,10 @@ void _3DO_init() {
   gpio_init(CDSTEN);
   gpio_put(CDSTEN, 1);
   gpio_set_dir(CDSTEN, true);
-  // gpio_set_pulls(CDSTEN, false, true);
 
   gpio_init(CDDTEN);
   gpio_put(CDDTEN, 1);
   gpio_set_dir(CDDTEN, true);
-  // gpio_set_pulls(CDDTEN, false, true);
 
 #ifndef USE_UART_RX
   gpio_init(LED);
