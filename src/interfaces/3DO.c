@@ -301,6 +301,7 @@ void sendData(int startlba, int nb_block, bool trace) {
     int current = id;
     int data_idx = 0;
     if (trace) a= get_absolute_time();
+    if (!currentDisc.mounted) return;
     readBlock(startlba, NB_BLOCK, currentDisc.block_size_read, &buffer[0]); //1block ~ 25 ms / 10 block ~ 25 ms
     // LOG_SATA("Block req\n");
     if (trace) b= get_absolute_time();
