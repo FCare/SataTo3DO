@@ -81,6 +81,7 @@ typedef struct {
   uint16_t block_size_read;
   uint8_t dev_addr;
   uint8_t lun;
+  bool hasOnlyAudio;
   track_s tracks[100];
 } cd_s;
 

@@ -150,7 +150,23 @@ void wait_out_of_reset() {
 }
 
 void set3doCDReady(bool on) {
-  if (on) status |= DISK_OK;
+  if (on) {
+    switch(currentDisc.format) {
+      case 0x0:
+        if (currentDisc.hasOnlyAudio)
+          printf("Audio CD detected\n");
+        else
+          printf("Data CD detected\n");
+        break;
+      case 0x20:
+        printf("Photo-CD detected\n");
+        break;
+      case 0xFF:
+        printf("CD-i detected\n");
+        break;
+    }
+  }
+  if (on && (currentDisc.format <= 0xF0)) status |= DISK_OK;
   else status &= ~DISK_OK;
 }
 
