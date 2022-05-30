@@ -319,6 +319,8 @@ bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const
       LOG_SATA("Got error with toc read\n");
       return false;
   }
+
+  setCDSpeed(706); //4x speed
   return true;
 }
 
