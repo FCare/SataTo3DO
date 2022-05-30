@@ -214,15 +214,11 @@ bool readSubQChannel(uint8_t *buffer) {
 
 static bool read_header_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   usb_state &= ~COMMAND_ON_GOING;
+  printf("format %x\n", readBuffer[0]);
   if (readBuffer[0] == 0x2) {
     /* 00h - audio; 01h - Mode 1 (games) - Mode 2 (CD-XA photoCD) */
-    //Photo CD shall have a data track. CD-i are Mode 2 but without data.
-    bool photoCD = false;
-    for (int i = 0; i<currentDisc.nb_track-1; i++) {
-      if ((currentDisc.tracks[i].CTRL_ADR & 0xF) == 0) photoCD = true;
-    }
-    if (photoCD) currentDisc.format = 0x20; //Only CD-ROM, CD-DA and CD-XA are supported
-    else currentDisc.format = 0xFF; //Not supported format
+    //Photo CD shall have an audio track. CD-i are Mode 2 but without audio.
+    currentDisc.format = 0x20; //Only CD-ROM, CD-DA and CD-XA are supported
   }
   currentDisc.mounted = true;
   usb_state |= DISC_MOUNTED;
@@ -246,7 +242,7 @@ static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw
     currentDisc.tracks[i].msf[0] = readBuffer[index + 5]; //MSF
     currentDisc.tracks[i].msf[1] = readBuffer[index + 6];
     currentDisc.tracks[i].msf[2] = readBuffer[index + 7];
-    if ((currentDisc.tracks[i].CTRL_ADR & 0xF) != 4) currentDisc.hasOnlyAudio |= false;
+    if ((currentDisc.tracks[i].CTRL_ADR & 0xF) != 0) currentDisc.hasOnlyAudio = false;
     currentDisc.tracks[i].lba = currentDisc.tracks[i].msf[0]*60*75+currentDisc.tracks[i].msf[1]*75+currentDisc.tracks[i].msf[2] - 150;
     LOG_SATA("Track[%d] 0x%x (0x%x)=> %d:%d:%d\n", i, currentDisc.tracks[i].id, currentDisc.tracks[i].CTRL_ADR, currentDisc.tracks[i].msf[0], currentDisc.tracks[i].msf[1], currentDisc.tracks[i].msf[2]);
   }
