@@ -242,7 +242,7 @@ static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw
     currentDisc.tracks[i].msf[0] = readBuffer[index + 5]; //MSF
     currentDisc.tracks[i].msf[1] = readBuffer[index + 6];
     currentDisc.tracks[i].msf[2] = readBuffer[index + 7];
-    if ((currentDisc.tracks[i].CTRL_ADR & 0xF) != 0) currentDisc.hasOnlyAudio = false;
+    if ((currentDisc.tracks[i].CTRL_ADR & 0x4) != 0) currentDisc.hasOnlyAudio = false;
     currentDisc.tracks[i].lba = currentDisc.tracks[i].msf[0]*60*75+currentDisc.tracks[i].msf[1]*75+currentDisc.tracks[i].msf[2] - 150;
     LOG_SATA("Track[%d] 0x%x (0x%x)=> %d:%d:%d\n", i, currentDisc.tracks[i].id, currentDisc.tracks[i].CTRL_ADR, currentDisc.tracks[i].msf[0], currentDisc.tracks[i].msf[1], currentDisc.tracks[i].msf[2]);
   }
