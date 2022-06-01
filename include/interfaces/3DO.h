@@ -89,5 +89,6 @@ extern void _3DO_init();
 extern void set3doCDReady(bool on);
 extern void set3doDriveMounted(bool on);
 extern void set3doDriveReady();
+extern void set3doDriveError();
 
 #endif

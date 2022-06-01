@@ -67,6 +67,9 @@ static volatile bool is_audio;
 static volatile bool has_subQ;
 
 static bool command_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
+  if (csw->status != MSC_CSW_STATUS_PASSED) {
+    set3doDriveError();
+  }
   usb_state &= ~COMMAND_ON_GOING;
 }
 
@@ -102,6 +105,9 @@ static void check_mount() {
 }
 
 static bool read_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
+  if (csw->status != MSC_CSW_STATUS_PASSED) {
+    set3doDriveError();
+  }
   read_done = true;
   usb_state &= ~COMMAND_ON_GOING;
   return true;

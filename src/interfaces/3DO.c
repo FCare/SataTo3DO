@@ -32,6 +32,8 @@ typedef enum{
   EJECT_DISC = 0x6,
   INJECT_DISC = 0x7,
   SET_MODE = 0x09,
+  ABORT = 0x08,
+  FLUSH = 0x0B,
   READ_DATA = 0x10,
   DATA_PATH_CHECK = 0x80,
   READ_ERROR = 0x82,
@@ -93,6 +95,8 @@ uint8_t sm[CHAN_MAX];
 uint8_t sm_offset[CHAN_MAX];
 int channel[CHAN_MAX];
 
+int errorOnDisk = 0;
+
 
 uint sm_read = -1;
 
@@ -151,6 +155,7 @@ void wait_out_of_reset() {
 
 void set3doCDReady(bool on) {
   if (on) {
+    errorOnDisk = 0;
     switch(currentDisc.format) {
       case 0x0:
         if (currentDisc.hasOnlyAudio)
@@ -179,6 +184,14 @@ void set3doDriveMounted(bool on) {
 }
 
 void set3doDriveReady() {
+}
+
+void set3doDriveError() {
+  errorOnDisk = 1;
+  errorCode = SOFT_READ_RETRY;
+  status |= CHECK_ERROR;
+  status &= ~DISK_OK;
+  status &= ~SPINNING;
 }
 
 bool is3doData() {
@@ -314,9 +327,10 @@ void sendData(int startlba, int nb_block, bool trace) {
     int data_idx = 0;
     if (trace) a= get_absolute_time();
     if (!currentDisc.mounted) return;
+
     readBlock(startlba, NB_BLOCK, currentDisc.block_size_read, &buffer[0]);
     if (trace) b= get_absolute_time();
-    while(!block_is_ready());
+    while(!block_is_ready() && !errorOnDisk);
 
     if (isAudioBlock(startlba)) {
       if (is_nil_time(lastPacket)) {
@@ -364,6 +378,7 @@ void handleCommand(uint32_t data) {
       data_in[i] = get3doData();
     }
       LOG_SATA("READ ID\n");
+      if (errorOnDisk != 0) errorOnDisk++;
       buffer[index++] = READ_ID;
       buffer[index++] =0x00; //manufacture Id
       buffer[index++] =0x10;
@@ -377,6 +392,10 @@ void handleCommand(uint32_t data) {
       buffer[index++] =0x00;
       buffer[index++] = status;
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      if (errorOnDisk == 9) {
+        //lot of retries after failure
+        //reset the usb host and ask for eject.
+      }
       break;
     case EJECT_DISC:
       for (int i=0; i<6; i++) {
@@ -465,6 +484,24 @@ void handleCommand(uint32_t data) {
         }
       }
       break;
+    case ABORT:
+      for (int i=0; i<6; i++) {
+        data_in[i] = get3doData();
+      }
+      LOG_SATA("ABORT\n");
+      buffer[index++] = ABORT;
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case FLUSH:
+        for (int i=0; i<6; i++) {
+          data_in[i] = get3doData();
+        }
+        LOG_SATA("FLUSH\n");
+        buffer[index++] = FLUSH;
+        buffer[index++] = status;
+        sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+        break;
     case READ_DISC_INFO:
       if (currentDisc.mounted) {
         for (int i=0; i<6; i++) {
