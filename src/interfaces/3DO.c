@@ -23,6 +23,8 @@ extern bool driveEject(bool eject);
 extern bool block_is_ready();
 extern bool isAudioBlock(uint32_t start);
 
+extern void USB_reset(void);
+
 #define GET_BUS(A) (((A)>>CDD0)&0xFF)
 
 extern cd_s currentDisc;
@@ -192,6 +194,7 @@ void set3doDriveError() {
   status |= CHECK_ERROR;
   status &= ~DISK_OK;
   status &= ~SPINNING;
+  USB_reset();
 }
 
 bool is3doData() {
@@ -392,10 +395,6 @@ void handleCommand(uint32_t data) {
       buffer[index++] =0x00;
       buffer[index++] = status;
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
-      if (errorOnDisk == 9) {
-        //lot of retries after failure
-        //reset the usb host and ask for eject.
-      }
       break;
     case EJECT_DISC:
       for (int i=0; i<6; i++) {

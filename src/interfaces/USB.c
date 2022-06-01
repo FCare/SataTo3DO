@@ -59,6 +59,8 @@ cd_s currentDisc = {0};
 
 volatile bool inquiry_cb_flag;
 
+static bool startClose = true;
+
 uint8_t readBuffer[20480];
 
 
@@ -67,29 +69,36 @@ static volatile bool is_audio;
 static volatile bool has_subQ;
 
 static bool command_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
-  if (csw->status != MSC_CSW_STATUS_PASSED) {
+  if ((csw->status != MSC_CSW_STATUS_PASSED) && (currentDisc.mounted)) {
     set3doDriveError();
   }
   usb_state &= ~COMMAND_ON_GOING;
 }
 
+static bool ExecuteEject(bool eject) {
+  usb_state |= COMMAND_ON_GOING;
+  printf("ExecuteEject %d\n", eject);
+  if ( !tuh_msc_start_stop(currentDisc.dev_addr, currentDisc.lun, eject, true, command_complete_cb)) {
+    LOG_SATA("Got error while eject command\n");
+  }
+  else {
+    if (!eject) {
+      set3doCDReady(false);
+      set3doDriveMounted(false);
+      currentDisc.mounted = false;
+      usb_state &= ~DISC_MOUNTED;
+    }
+    return true;
+  }
+  return false;
+}
+
 static bool check_eject() {
   if (requestEject!=-1) {
-    usb_state |= COMMAND_ON_GOING;
     //Execute right now
     LOG_SATA("Eject %d\n", requestEject);
-    if ( !tuh_msc_start_stop(currentDisc.dev_addr, currentDisc.lun, requestEject, true, command_complete_cb)) {
-      LOG_SATA("Got error while eject command\n");
-    }
-    else {
-      if (requestEject == 0) {
-        set3doCDReady(false);
-        set3doDriveMounted(false);
-        currentDisc.mounted = false;
-        usb_state &= ~DISC_MOUNTED;
-      }
+    if (ExecuteEject(requestEject != 0))
       requestEject = -1;
-    }
     return true;
   }
   return false;
@@ -104,8 +113,17 @@ static void check_mount() {
   }
 }
 
+void USB_reset(void) {
+  printf("reset usb\n");
+  usb_state = 0;
+  startClose = false;
+  tuh_msc_umount_cb(currentDisc.dev_addr);
+  tusb_reset();
+}
+
 static bool read_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   if (csw->status != MSC_CSW_STATUS_PASSED) {
+
     set3doDriveError();
   }
   read_done = true;
@@ -340,6 +358,8 @@ void tuh_msc_enumerated_cb(uint8_t dev_addr)
   currentDisc.dev_addr = dev_addr;
   usb_state |= ENUMERATED;
   usb_state &= ~COMMAND_ON_GOING;
+  if (!startClose) ExecuteEject(startClose);
+  startClose = true;
 }
 
 void tuh_msc_mount_cb(uint8_t dev_addr)
