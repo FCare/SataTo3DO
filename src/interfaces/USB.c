@@ -7,6 +7,7 @@ static bool check_eject();
 static void check_speed();
 static void check_block();
 static void check_mount();
+static bool check_subq();
 #endif
 
 typedef enum {
@@ -149,7 +150,7 @@ void check_block() {
   }
 }
 
-void check_subq() {
+static bool check_subq() {
   if (subqRequired) {
     usb_state |= COMMAND_ON_GOING;
     subqRequired = false;
