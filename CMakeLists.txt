@@ -33,6 +33,7 @@ target_sources(SataTo3DO PRIVATE
 src/main.c
 src/interfaces/USB.c
 src/interfaces/3DO.c
+src/interfaces/CDROM.c
 )
 
 pico_generate_pio_header(SataTo3DO ${CMAKE_CURRENT_LIST_DIR}/src/interfaces/read.pio)

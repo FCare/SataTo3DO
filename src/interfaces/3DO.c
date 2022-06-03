@@ -10,6 +10,7 @@
 #include "pico/multicore.h"
 
 #include "3DO.h"
+#include "CDFormat.h"
 
 #define DATA_BUS_MASK (0xFF<<CDD0)
 
