@@ -2,6 +2,7 @@
 #include "CDFormat.h"
 #include "3DO.h"
 #include "CDROM.h"
+#include "MSC.h"
 #include "pico/stdio.h"
 
 uint8_t usb_state = 0;
@@ -131,9 +132,9 @@ bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const
     return CDROM_Inquiry(dev_addr, cbw, csw);
   }
 
-  // if (inquiry_resp.peripheral_device_type == 0x0) {
-  //   return MSC_Inquiry(dev_addr, cbw, csw);
-  // }
+  if (inquiry_resp.peripheral_device_type == 0x0) {
+    return MSC_Inquiry(dev_addr, cbw, csw);
+  }
 
   return false;
 }

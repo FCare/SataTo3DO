@@ -20,6 +20,7 @@ add_definitions(-DPICO_TINYUSB_PATH=${PICO_TINYUSB_PATH})
 
 pico_sdk_init()
 
+include_directories(./FATFs)
 include_directories(./include)
 include_directories(./include/controllers)
 include_directories(./include/interfaces)
@@ -34,6 +35,10 @@ src/main.c
 src/interfaces/USB.c
 src/interfaces/3DO.c
 src/interfaces/CDROM.c
+src/interfaces/MSC.c
+FATFs/diskio.c
+FATFs/ff.c
+FATFs/ffunicode.c
 )
 
 pico_generate_pio_header(SataTo3DO ${CMAKE_CURRENT_LIST_DIR}/src/interfaces/read.pio)
