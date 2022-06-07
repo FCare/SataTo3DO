@@ -35,6 +35,9 @@ static bool startClose = true;
 
 uint8_t readBuffer[20480];
 
+static FRESULT processDir(FILINFO* fileInfo, char* path);
+static void processFile(FILINFO* fileInfo, char* path);
+
 
 extern volatile bool is_audio;
 extern volatile bool has_subQ;
@@ -67,6 +70,50 @@ static void print_error_text(FRESULT e) {
   printf("\n");
 }
 
+static void processFileorDir(FILINFO* fileInfo) {
+  bool isDir = (fileInfo->fattrib & AM_DIR);
+  if (!(fileInfo->fname[0] == '.' || fileInfo->fattrib & (AM_HID | AM_SYS))) {  // skip hidden or system files
+    if (isDir) processDir(fileInfo, ".");
+    else processFile(fileInfo, ".");
+  }
+}
+
+static FRESULT processDir(FILINFO* fileInfo, char *path) {
+  FRESULT res;
+  DIR dir;
+  UINT i;
+  FILINFO* fno = malloc(sizeof(FILINFO));
+
+  i = strlen(fileInfo->fname);
+  char *newPath = malloc(strlen(path)+i+2);
+  sprintf(&newPath[0], "%s/%s", path, fileInfo->fname);
+
+  res = f_opendir(&dir, fileInfo->fname);                       /* Open the directory */
+  if (res == FR_OK) {
+    for (;;) {
+        res = f_readdir(&dir, fno);                   /* Read a directory item */
+        if (res != FR_OK || fno->fname[0] == 0) break;  /* Break on error or end of dir */
+        if (fno->fattrib & AM_DIR) {                    /* It is a directory */
+            res = processDir(fno, newPath);                    /* Enter the directory */
+            if (res != FR_OK) break;
+        } else {                                       /* It is a file. */
+          processFile(fno, newPath);
+        }
+    }
+    f_closedir(&dir);
+  }
+  free(newPath);
+  return res;
+}
+
+static void processFile(FILINFO* fileInfo, char* path) {
+  if (fileInfo->altname[0] == 0) {
+    printf("FILE %s/%s\n",path, fileInfo->fname);
+  } else {
+    printf("FILE %s/%s aka %s/%s\n", path, fileInfo->fname, path, fileInfo->altname);
+  }
+}
+
 bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   FRESULT result;
   printf("MSC_Inquiry\n");
@@ -82,25 +129,13 @@ bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   DIR dirInfo;
 
   FRESULT res = f_findfirst(&dirInfo, &fileInfo, "", "*");
-  bool isDir = (fileInfo.fattrib & AM_DIR);
-  if (fileInfo.altname[0] == 0) {
-    printf("%s %s\n", isDir?"DIR":"FILE",fileInfo.fname);
-  } else {
-    printf("%s %s aka %s\n", isDir?"DIR":"FILE",fileInfo.fname, fileInfo.altname);
-  }
+  processFileorDir(&fileInfo);
   while (1) {
     res = f_findnext(&dirInfo, &fileInfo);
-    isDir = (fileInfo.fattrib & AM_DIR);
     if (res != FR_OK || fileInfo.fname[0] == 0) {
       break;
     }
-    if (!(fileInfo.fname[0] == '.' || fileInfo.fattrib & (AM_HID | AM_SYS))) {  // skip hidden or system files
-      if (fileInfo.altname[0] == 0) {
-        printf("%s %s\n", isDir?"DIR":"FILE",fileInfo.fname);
-      } else {
-        printf("%s %s aka %s\n", isDir?"DIR":"FILE",fileInfo.fname, fileInfo.altname);
-      }
-    }
+    processFileorDir(&fileInfo);
   }
 
   FATFS* ff;
