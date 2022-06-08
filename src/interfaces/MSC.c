@@ -73,8 +73,8 @@ static void print_error_text(FRESULT e) {
 static void processFileorDir(FILINFO* fileInfo) {
   bool isDir = (fileInfo->fattrib & AM_DIR);
   if (!(fileInfo->fname[0] == '.' || fileInfo->fattrib & (AM_HID | AM_SYS))) {  // skip hidden or system files
-    if (isDir) processDir(fileInfo, ".");
-    else processFile(fileInfo, ".");
+    if (isDir) processDir(fileInfo, "0:");
+    else processFile(fileInfo, "0:");
   }
 }
 
@@ -86,7 +86,7 @@ static FRESULT processDir(FILINFO* fileInfo, char *path) {
 
   i = strlen(fileInfo->fname);
   char *newPath = malloc(strlen(path)+i+2);
-  sprintf(&newPath[0], "%s/%s", path, fileInfo->fname);
+  sprintf(&newPath[0], "%s\\%s", path, fileInfo->fname);
 
   res = f_opendir(&dir, fileInfo->fname);                       /* Open the directory */
   if (res == FR_OK) {
@@ -106,11 +106,37 @@ static FRESULT processDir(FILINFO* fileInfo, char *path) {
   return res;
 }
 
+static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
+  FIL myFile;
+  UINT i = strlen(fileInfo->fname);
+  FRESULT fr;
+  char line[100];
+  char *newPath = malloc(strlen(path)+i+2);
+  sprintf(&newPath[0], "%s\\%s", path, fileInfo->fname);
+  fr = f_open(&myFile, newPath, FA_READ);
+  if (fr){
+     printf("can not open %s for reading\n",newPath);
+     return;
+  }
+  printf("Read %s\n", newPath);
+  // Time to generate TOC
+  for (;;)
+  {
+    /* Read every line and display it */
+    while (f_gets(line, sizeof line, &myFile)) {
+        printf("%s\n", line);
+    }
+
+    /* Close the file */
+    f_close(&myFile);
+    break;
+  }
+}
+
 static void processFile(FILINFO* fileInfo, char* path) {
-  if (fileInfo->altname[0] == 0) {
-    printf("FILE %s/%s\n",path, fileInfo->fname);
-  } else {
-    printf("FILE %s/%s aka %s/%s\n", path, fileInfo->fname, path, fileInfo->altname);
+  if (f_path_contains(fileInfo->fname,"*.cue")){
+    printf("CUE FILE %s/%s\n",path, fileInfo->fname);
+    ExtractInfofromCue(fileInfo, path);
   }
 }
 
