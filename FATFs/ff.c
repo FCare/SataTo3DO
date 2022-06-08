@@ -2796,7 +2796,6 @@ DWORD get_achar (		/* Get a character and advances ptr */
 }
 
 
-static
 int pattern_matching (	/* 0:not matched, 1:matched */
 	const TCHAR* pat,	/* Matching pattern */
 	const TCHAR* nam,	/* String to be tested */

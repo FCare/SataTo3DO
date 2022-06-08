@@ -285,6 +285,11 @@ TCHAR* f_gets (TCHAR* buff, int len, FIL* fp);						/* Get a string from the fil
 #define f_rmdir(path) f_unlink(path)
 #define f_unmount(path) f_mount(0, path, 0)
 
+
+#if FF_USE_FIND && FF_FS_MINIMIZE <= 1
+int pattern_matching (const TCHAR* pat,	const TCHAR* nam,	int skip,	int inf);
+#define f_path_contains(path, pattern) pattern_matching(pattern, path, 0, 0)
+#endif
 #ifndef EOF
 #define EOF (-1)
 #endif
