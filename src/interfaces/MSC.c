@@ -42,6 +42,17 @@ static void processFile(FILINFO* fileInfo, char* path);
 extern volatile bool is_audio;
 extern volatile bool has_subQ;
 
+#define NB_SUPPORTED_GAMES 100
+
+typedef struct {
+  char* CuePath;
+  char* BinPath[100]; //same number as tracks number
+  cd_s info;
+} bin_s;
+
+static bin_s allImage[NB_SUPPORTED_GAMES] = {0};
+int nb_img = 0;
+
 
 static void print_error_text(FRESULT e) {
   switch (e) {
@@ -118,13 +129,107 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
      printf("can not open %s for reading\n",newPath);
      return;
   }
+  allImage[nb_img].CuePath = newPath;
+  nb_img++;
   printf("Read %s\n", newPath);
   // Time to generate TOC
   for (;;)
   {
     /* Read every line and display it */
     while (f_gets(line, sizeof line, &myFile)) {
-        printf("%s\n", line);
+      char line_end[100];
+      char line_start[100];
+      if (sscanf(line, " %s %[^\r\n]\r\n", line_start, line_end) != EOF) {
+        if (strncmp(line_start, "FILE", 4) == 0) {
+          FILINFO binInfo;
+          char filename[100];
+          sscanf(line_end, " \"%[^\"]\"", filename);
+
+          char *binPath = malloc(strlen(path)+strlen(filename)+2);
+          sprintf(&binPath[0], "%s\\%s", path, filename);
+          fr = f_stat(binPath, &binInfo);
+          if (fr == FR_NO_FILE) break; //Bin file does not exists
+          if (binInfo.fattrib & AM_DIR) break; //not a file
+          continue;
+        }
+        if (strncmp(line_start, "TRACK", 5) == 0) {
+          unsigned int track_num = 0;
+          unsigned int sector_size = 0;
+          unsigned int ctl_addr = 0;
+          if (sscanf(line_end, " %u %[^\r\n]\r\n", &track_num, line_end) != EOF)
+          {
+            if (strncmp(line_end, "MODE1", 5) == 0 ||
+            strncmp(line_end, "MODE2", 5) == 0)
+            {
+              // Figure out the track sector size
+              sector_size = atoi(line_end + 6);
+              ctl_addr = 0x4;
+            }
+            else if (strncmp(line_end, "AUDIO", 5) == 0)
+            {
+              // Update toc entry
+              sector_size = 2352;
+              ctl_addr = 0x0;
+            }
+          }
+          continue;
+        }
+        if (strncmp(line_start, "TRACK", 5) == 0) {
+          unsigned int track_num = 0;
+          unsigned int sector_size = 0;
+          unsigned int ctl_addr = 0;
+          if (sscanf(line_end, " %u %[^\r\n]\r\n", &track_num, line_end) != EOF)
+          {
+            if (strncmp(line_end, "MODE1", 5) == 0 ||
+            strncmp(line_end, "MODE2", 5) == 0)
+            {
+              // Figure out the track sector size
+              sector_size = atoi(line_end + 6);
+              ctl_addr = 0x4;
+            }
+            else if (strncmp(line_end, "AUDIO", 5) == 0)
+            {
+              // Update toc entry
+              sector_size = 2352;
+              ctl_addr = 0x0;
+            }
+          }
+          continue;
+        }
+        else if (strncmp(line_start, "INDEX", 5) == 0)
+        {
+          unsigned int indexnum, min, sec, frame;
+           if (sscanf(line_end, " %u %u:%u:%u\r\n", &indexnum, &min, &sec, &frame) == EOF)
+              break;
+
+           if (indexnum == 1)
+           {
+              // Update toc entry
+              // fad += MSF_TO_FAD(min, sec, frame) + pregap;
+              // trk[track_num-1].fad_start = fad;
+              // trk[track_num-1].file_offset = MSF_TO_FAD(min, sec, frame) * trk[track_num-1].sector_size;
+              // CDLOG("Start[%d] %d\n", track_num, trk[track_num-1].fad_start);
+              // if (track_num > 1) {
+              //   trk[track_num-2].fad_end = trk[track_num-1].fad_start-1;
+              //   CDLOG("End[%d] %d\n", track_num-1, trk[track_num-2].fad_end);
+              // }
+           }
+        }
+#ifdef USE_PRE_POST_GAP
+        else if (strncmp(line_start, "PREGAP", 6) == 0)
+        {
+           if (sscanf(line_end, " %d:%d:%d\r\n", &min, &sec, &frame) == EOF)
+              break;
+
+           // pregap += MSF_TO_FAD(min, sec, frame);
+        }
+        else if (strncmp(line_start, "POSTGAP", 7) == 0)
+        {
+           if (sscanf(line_end, " %d:%d:%d\r\n", &min, &sec, &frame) == EOF)
+              break;
+        }
+#endif
+      }
     }
 
     /* Close the file */
@@ -143,6 +248,19 @@ static void processFile(FILINFO* fileInfo, char* path) {
 bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   FRESULT result;
   printf("MSC_Inquiry\n");
+  for (int i = 0; i<nb_img; i++){
+    if (allImage[i].CuePath != NULL) {
+      free(allImage[i].CuePath);
+      allImage[i].CuePath = NULL;
+    }
+    for (int j=0; j<100; j++) {
+      if (allImage[i].BinPath[j] != NULL) {
+        free(allImage[i].BinPath[j]);
+        allImage[i].BinPath[j] = NULL;
+      }
+    }
+  }
+  nb_img = 0;
   result = f_mount(&DiskFATState, "" , 1);
   if (result!=FR_OK) return false;
 
