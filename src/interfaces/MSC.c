@@ -10,13 +10,16 @@ extern uint32_t nb_block_Block;
 extern uint8_t *buffer_Block;
 extern bool blockRequired;
 
+extern bool subqRequired;
+extern uint8_t *buffer_subq;
+
 extern volatile bool read_done;
 
 #if CFG_TUH_MSC
 // static bool check_eject();
 // static void check_speed();
 static void check_block();
-// static bool check_subq();
+static void check_subq();
 #endif
 
 static FATFS  DiskFATState;
@@ -31,7 +34,7 @@ bool MSC_Host_loop()
           if (usb_state & DISC_MOUNTED) {
             // check_speed();
             check_block();
-            // check_subq();
+            check_subq();
             return true;
           } else {
             return false;
@@ -102,6 +105,38 @@ static void print_error_text(FRESULT e) {
   printf("\n");
 }
 
+static void check_subq() {
+  if (subqRequired) {
+    usb_state |= COMMAND_ON_GOING;
+    cd_s *target_track = &allImage[selected_img].info;
+    FIL *fileOpen = &allImage[selected_img].File;
+    memset(buffer_subq, 0x0, 16);
+    uint lba = start_Block;
+    buffer_subq[9] =  lba/(60*75);
+    lba %= 60*75;
+    buffer_subq[10] = lba / 75;
+    buffer_subq[11] = lba % 75;
+    for (int i = 0; i<allImage[nb_img].info.last_track; i++)
+    {
+      if (target_track->tracks[i].lba <= start_Block) {
+        buffer_subq[5] = target_track->tracks[i].CTRL_ADR;
+        buffer_subq[6] = target_track->tracks[i].id;
+        buffer_subq[7] = 1;
+        lba = start_Block - target_track->tracks[i].lba;
+        buffer_subq[13] = lba/(60*75);
+        lba %= 60*75;
+        buffer_subq[14] = lba / 75;
+        buffer_subq[15] = lba % 75;
+      } else {
+        break;
+      }
+    }
+    usb_state &= ~COMMAND_ON_GOING;
+    subqRequired = false;
+    read_done = true;
+  }
+}
+
 static void check_block() {
   if (blockRequired) {
     // printf("Block required %d %d %d %d\n",start_Block, allImage[selected_img].info.tracks[0].lba, nb_block_Block, currentDisc.block_size_read);
@@ -111,6 +146,7 @@ static void check_block() {
     FIL *fileOpen = &allImage[selected_img].File;
     uint read_nb = 0;
     uint offset = (start_Block - target_track->tracks[0].lba)*currentDisc.block_size;
+    uint block_size_to_read = currentDisc.block_size_read;
     if (currentDisc.block_size != currentDisc.block_size_read) {
       if (currentDisc.format != 0) {
         //Assuming a XA format has only MODE_2 and CDDA track
@@ -126,10 +162,34 @@ static void check_block() {
         }
       }
     }
-    // printf("Seek %d bytes\n", (start_Block - target_track->tracks[0].lba)*currentDisc.block_size_read);
     if (f_lseek(fileOpen, offset) != FR_OK) printf("Can not seek %s\n", allImage[selected_img].BinPath);
-    if (f_read(fileOpen, buffer_Block, nb_block_Block*currentDisc.block_size_read, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
-    if (read_nb != nb_block_Block*currentDisc.block_size_read) printf("Bad read %d %d\n", read_nb, nb_block_Block*currentDisc.block_size_read);
+    if (is_audio) {
+      if (has_subQ) {
+        //Work only for 1 block here
+        //If audio read without subQ, it might not work
+        // 2448 = (6*4)*98 + 96*1
+        //subChannel of first two small frames are used for synchro. Does not need to be returned
+        //Read first smallframe
+        if (f_read(fileOpen, &buffer_Block[0], 24, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
+        //Read second smallframe
+        if (f_read(fileOpen, &buffer_Block[24], 8, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
+        if (f_read(fileOpen, &buffer_Block[24], 24, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
+        //Read last values
+        if (f_read(fileOpen, &buffer_Block[48], 8, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
+        if (f_read(fileOpen, &buffer_Block[48], 2400, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
+      } else {
+        for (int i=0; i<98; i++)
+        {
+          if (f_read(fileOpen, &buffer_Block[24*i], 24, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
+          if (f_read(fileOpen, &buffer_Block[24*(i+1)], 8, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
+        }
+      }
+    } else {
+      if (f_read(fileOpen, buffer_Block, nb_block_Block*currentDisc.block_size_read, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
+      if (read_nb != nb_block_Block*currentDisc.block_size_read) printf("Bad read %d %d\n", read_nb, nb_block_Block*currentDisc.block_size_read);
+    }
+    // printf("Seek %d bytes\n", (start_Block - target_track->tracks[0].lba)*currentDisc.block_size_read);
+
     // else printf("Read done\n");
     usb_state &= ~COMMAND_ON_GOING;
     blockRequired = false;
@@ -244,7 +304,8 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
             else if (strncmp(line_end, "AUDIO", 5) == 0)
             {
               // Update toc entry
-              allImage[nb_img].info.block_size = allImage[nb_img].info.block_size_read = 2352;
+              allImage[nb_img].info.block_size = 3136; //(98 * (24+8))
+              allImage[nb_img].info.block_size_read = 2352; // 98*24
               allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x0;
               allImage[nb_img].info.tracks[track_num - 1].id = track_num;
               allImage[nb_img].info.tracks[track_num - 1].mode = CDDA;
@@ -359,7 +420,7 @@ bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
     }
     processFileorDir(&fileInfo);
   }
-  // selected_img = nb_img-1;
+  selected_img = 5;
   memcpy(&currentDisc, &allImage[selected_img].info, sizeof(cd_s));
   if (f_open(&allImage[selected_img].File, allImage[selected_img].BinPath, FA_READ) == FR_OK) {
     currentDisc.mounted = true;
