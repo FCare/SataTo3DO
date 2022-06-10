@@ -167,16 +167,7 @@ static void check_block() {
       if (has_subQ) {
         //Work only for 1 block here
         //If audio read without subQ, it might not work
-        // 2448 = (6*4)*98 + 96*1
-        //subChannel of first two small frames are used for synchro. Does not need to be returned
-        //Read first smallframe
-        if (f_read(fileOpen, &buffer_Block[0], 24, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
-        //Read second smallframe
-        if (f_read(fileOpen, &buffer_Block[24], 8, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
-        if (f_read(fileOpen, &buffer_Block[24], 24, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
-        //Read last values
-        if (f_read(fileOpen, &buffer_Block[48], 8, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
-        if (f_read(fileOpen, &buffer_Block[48], 2400, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
+        if (f_read(fileOpen, &buffer_Block[0], 2448, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
       } else {
         for (int i=0; i<98; i++)
         {
@@ -304,7 +295,7 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
             else if (strncmp(line_end, "AUDIO", 5) == 0)
             {
               // Update toc entry
-              allImage[nb_img].info.block_size = 3136; //(98 * (24+8))
+              allImage[nb_img].info.block_size = 2448; //(98 * (24+1)) - 2
               allImage[nb_img].info.block_size_read = 2352; // 98*24
               allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x0;
               allImage[nb_img].info.tracks[track_num - 1].id = track_num;
