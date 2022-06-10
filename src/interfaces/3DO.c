@@ -312,11 +312,10 @@ bool sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
   pio_sm_set_enabled(pio0, sm[CHAN_WRITE_DATA], false);
   return true;
 }
-#define NB_BLOCK 1
 absolute_time_t lastPacket;
 void sendData(int startlba, int nb_block, bool trace) {
 
-  uint8_t buffer[2500*NB_BLOCK];
+  uint8_t buffer[2500];
   uint8_t status_buffer[2] = {READ_DATA, status};
   int start = startlba;
   absolute_time_t a,b,c,d,e, s;
@@ -332,7 +331,7 @@ void sendData(int startlba, int nb_block, bool trace) {
     if (trace) a= get_absolute_time();
     if (!currentDisc.mounted) return;
 
-    readBlock(startlba, NB_BLOCK, currentDisc.block_size_read, &buffer[0]);
+    readBlock(startlba, 1, currentDisc.block_size_read, &buffer[0]);
     if (trace) b= get_absolute_time();
     while(!block_is_ready() && !errorOnDisk);
 
@@ -517,6 +516,7 @@ void handleCommand(uint32_t data) {
           buffer[index++] = currentDisc.msf[0];
           buffer[index++] = currentDisc.msf[1];
           buffer[index++] = currentDisc.msf[2];
+
         } else {
           errorCode = NOT_READY;
           buffer[index++] = 0x0;
@@ -528,6 +528,7 @@ void handleCommand(uint32_t data) {
         }
         buffer[index++] = status;
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+        printf("%d %x %d %d %d:%d:%d\n", currentDisc.mounted, buffer[1], buffer[2],buffer[3],buffer[4],buffer[5],buffer[6]);
       }
       break;
     case READ_TOC:
@@ -547,6 +548,7 @@ void handleCommand(uint32_t data) {
         buffer[index++] = 0x0;
         buffer[index++] = status;
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+        printf("%x %d %d:%d:%d\n", buffer[2], buffer[3],buffer[5],buffer[6],buffer[7]);
       }
       break;
     case READ_SESSION:
@@ -574,6 +576,8 @@ void handleCommand(uint32_t data) {
         }
         buffer[index++] = status;
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+
+        printf("%d:%d:%d\n", buffer[2], buffer[3],buffer[4]);
       }
     break;
     case READ_CAPACITY:

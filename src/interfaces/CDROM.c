@@ -7,11 +7,10 @@
 static bool check_eject();
 static void check_speed();
 static void check_block();
-static void check_mount();
 static bool check_subq();
 #endif
 
-void CDROM_Host_loop()
+bool CDROM_Host_loop()
 {
   // tinyusb host task
 #if CFG_TUH_MSC
@@ -22,12 +21,14 @@ void CDROM_Host_loop()
           check_speed();
           check_block();
           check_subq();
+          return true;
         } else {
-          check_mount();
+          return false;
         }
       }
     }
   }
+  return true;
 #endif
 }
 
@@ -82,15 +83,6 @@ static bool check_eject() {
     return true;
   }
   return false;
-}
-
-static void check_mount() {
-  if (!currentDisc.mounted) {
-    //Send a sense loop
-    uint8_t const lun = 0;
-    usb_state |= COMMAND_ON_GOING;
-    checkForMedia(currentDisc.dev_addr, lun);
-  }
 }
 
 extern uint32_t start_Block;
@@ -224,7 +216,6 @@ bool CDROM_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw)
   currentDisc.nb_block = tuh_msc_get_block_count(dev_addr, cbw->lun);
   currentDisc.block_size = tuh_msc_get_block_size(dev_addr, cbw->lun);
   currentDisc.block_size_read = currentDisc.block_size;
-  currentDisc.lun = cbw->lun;
 
   int lba = currentDisc.nb_block + 150;
   currentDisc.msf[0] = lba/(60*75);

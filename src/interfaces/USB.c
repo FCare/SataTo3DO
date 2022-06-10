@@ -7,16 +7,49 @@
 
 uint8_t usb_state = 0;
 
+static void check_mount();
+
+static scsi_inquiry_resp_t inquiry_resp;
+
 void USB_Host_init() {
+    inquiry_resp.peripheral_device_type = 0x1F;
     stdio_init_all();
     tusb_init();
+}
+
+static bool Default_Host_loop() {
+  #if CFG_TUH_MSC
+    if(usb_state & ENUMERATED) {
+      if (!(usb_state & COMMAND_ON_GOING)) {
+        if (usb_state & DISC_MOUNTED) {
+          return true;
+        } else {
+          return false;
+        }
+      }
+    }
+    return true;
+  #endif
 }
 
 void USB_Host_loop()
 {
   // tinyusb host task
+  bool ret = true;
   tuh_task();
-  CDROM_Host_loop();
+  if (inquiry_resp.peripheral_device_type == 0x5) {
+    ret = CDROM_Host_loop();
+  }
+
+  else if (inquiry_resp.peripheral_device_type == 0x0) {
+    ret = MSC_Host_loop();
+  }
+  else {
+    ret = Default_Host_loop();
+  }
+  if(!ret) {
+    check_mount();
+  }
 }
 
 
@@ -25,7 +58,6 @@ void USB_Host_loop()
 //--------------------------------------------------------------------+
 // MACRO TYPEDEF CONSTANT ENUM DECLARATION
 //--------------------------------------------------------------------+
-static scsi_inquiry_resp_t inquiry_resp;
 
 volatile int8_t requestEject = -1;
 cd_s currentDisc = {0};
@@ -37,7 +69,7 @@ static bool startClose = true;
 uint8_t readBuffer[20480];
 
 
-static volatile bool read_done;
+volatile bool read_done;
 volatile bool is_audio;
 volatile bool has_subQ;
 
@@ -56,6 +88,15 @@ void USB_reset(void) {
   tusb_reset();
 }
 
+static void check_mount() {
+  if (!currentDisc.mounted) {
+    //Send a sense loop
+    uint8_t const lun = 0;
+    usb_state |= COMMAND_ON_GOING;
+    checkForMedia(currentDisc.dev_addr, lun);
+  }
+}
+
 bool read_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   if (csw->status != MSC_CSW_STATUS_PASSED) {
 
@@ -67,7 +108,7 @@ bool read_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* c
 }
 
 bool block_is_ready() {
-  usb_state &= ~COMMAND_ON_GOING;
+  // usb_state &= ~COMMAND_ON_GOING;
   return read_done;
 }
 
@@ -128,6 +169,8 @@ bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const
   // Print out Vendor ID, Product ID and Rev
   LOG_SATA("%.8s %.16s rev %.4s Type 0x%x Lun %d\r\n", inquiry_resp.vendor_id, inquiry_resp.product_id, inquiry_resp.product_rev, inquiry_resp.peripheral_device_type, cbw->lun);
 
+  currentDisc.lun = cbw->lun;
+
   if (inquiry_resp.peripheral_device_type == 0x5) {
     return CDROM_Inquiry(dev_addr, cbw, csw);
   }
@@ -172,6 +215,7 @@ void tuh_msc_umount_cb(uint8_t dev_addr)
   set3doCDReady(false);
   set3doDriveMounted(false);
   currentDisc.mounted = false;
+  inquiry_resp.peripheral_device_type = 0x1F;
   usb_state &= ~DISC_MOUNTED;
 }
 
