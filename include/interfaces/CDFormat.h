@@ -1,11 +1,19 @@
 #ifndef __CDROM_FORMAT_H_INCLUDE__
 #define __CDROM_FORMAT_H_INCLUDE__
 
+typedef enum {
+  MODE_0 = 0,
+  MODE_1,
+  MODE_2,
+  CDDA
+} mode_s;
+
 typedef struct {
   uint8_t id;
   uint8_t CTRL_ADR;
   uint8_t msf[3];
   uint32_t lba;
+  mode_s mode;
 } track_s;
 
 typedef struct {

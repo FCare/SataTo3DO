@@ -111,7 +111,21 @@ static void check_block() {
     FIL *fileOpen = &allImage[selected_img].File;
     uint read_nb = 0;
     uint offset = (start_Block - target_track->tracks[0].lba)*currentDisc.block_size;
-    if (currentDisc.block_size != currentDisc.block_size_read) offset += 16; //Skip header
+    if (currentDisc.block_size != currentDisc.block_size_read) {
+      if (currentDisc.format != 0) {
+        //Assuming a XA format has only MODE_2 and CDDA track
+        if (currentDisc.block_size_read == 2048) {
+          //Mode 2 Form1
+          offset += 12 + 4 + 8; //Skip Sync, Header and subHeader
+        }
+      } else {
+        //Mode 1 or CDDA
+        if (currentDisc.block_size_read == 2048) {
+          //Mode 1
+          offset += 12 + 4; //Skip Sync and Header
+        }
+      }
+    }
     // printf("Seek %d bytes\n", (start_Block - target_track->tracks[0].lba)*currentDisc.block_size_read);
     if (f_lseek(fileOpen, offset) != FR_OK) printf("Can not seek %s\n", allImage[selected_img].BinPath);
     if (f_read(fileOpen, buffer_Block, nb_block_Block*currentDisc.block_size_read, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
@@ -211,29 +225,29 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
             if (strncmp(line_end, "MODE1", 5) == 0)
             {
               // Figure out the track sector size
-              allImage[nb_img].info.format = 0x0;
               allImage[nb_img].info.block_size =  atoi(line_end + 6);
               allImage[nb_img].info.block_size_read = 2048;
               allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x4;
               allImage[nb_img].info.tracks[track_num - 1].id = track_num;
+              allImage[nb_img].info.tracks[track_num - 1].mode = MODE_1;
             }
             else if (strncmp(line_end, "MODE2", 5) == 0)
             {
               //PhotoCD cue file
               // Figure out the track sector size
-              allImage[nb_img].info.format = 0x20;
               allImage[nb_img].info.block_size = allImage[nb_img].info.block_size_read = atoi(line_end + 6);
               allImage[nb_img].info.block_size_read = 2048;
               allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x4;
               allImage[nb_img].info.tracks[track_num - 1].id = track_num;
+              allImage[nb_img].info.tracks[track_num - 1].mode = MODE_2;
             }
             else if (strncmp(line_end, "AUDIO", 5) == 0)
             {
               // Update toc entry
-              allImage[nb_img].info.format = 0x0;
               allImage[nb_img].info.block_size = allImage[nb_img].info.block_size_read = 2352;
               allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x0;
               allImage[nb_img].info.tracks[track_num - 1].id = track_num;
+              allImage[nb_img].info.tracks[track_num - 1].mode = CDDA;
             }
             else {
               valid = false;
@@ -282,11 +296,14 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
       allImage[nb_img].info.first_track = 1;
       allImage[nb_img].info.last_track = allImage[nb_img].info.nb_track;
       allImage[nb_img].info.hasOnlyAudio = true;
+      allImage[nb_img].info.format = 0x0;
       for (int i = 0; i<allImage[nb_img].info.last_track; i++)
       {
         if (allImage[nb_img].info.tracks[i].CTRL_ADR & 0x4) {
           allImage[nb_img].info.hasOnlyAudio = false;
-          break;
+        }
+        if (allImage[nb_img].info.tracks[i].mode == MODE_2){
+          allImage[nb_img].info.format = 0x20; //XA format
         }
       }
       allImage[nb_img].info.nb_block /= allImage[nb_img].info.block_size;
