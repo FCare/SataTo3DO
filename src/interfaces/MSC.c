@@ -175,7 +175,7 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
      return;
   }
 
-  printf("Read %s\n", newPath);
+  printf("Game %d: Read %s\n", nb_img, newPath);
   // Time to generate TOC
   for (;;)
   {
@@ -217,7 +217,7 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
               allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x4;
               allImage[nb_img].info.tracks[track_num - 1].id = track_num;
             }
-            else if (strncmp(line_end, "MODE1", 5) == 0)
+            else if (strncmp(line_end, "MODE2", 5) == 0)
             {
               //PhotoCD cue file
               // Figure out the track sector size
@@ -306,7 +306,6 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
 
 static void processFile(FILINFO* fileInfo, char* path) {
   if (f_path_contains(fileInfo->fname,"*.cue")){
-    printf("CUE FILE %s/%s\n",path, fileInfo->fname);
     ExtractInfofromCue(fileInfo, path);
   }
 }
