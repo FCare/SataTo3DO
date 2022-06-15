@@ -420,6 +420,7 @@ static void ExtractInfofromIso(FILINFO *fileInfo, char* path) {
   allImage[nb_img].info.tracks[0].msf[2] = 0;
   allImage[nb_img].info.tracks[0].lba = 0;
   allImage[nb_img].info.tracks[0].mode = MODE_1;
+  allImage[nb_img].info.tracks[0].id = 1;
 
   int lba = allImage[nb_img].info.nb_block + 150;
   allImage[nb_img].info.msf[0] = lba/(60*75);
