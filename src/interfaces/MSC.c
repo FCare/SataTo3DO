@@ -5,6 +5,12 @@
 
 #include "diskio.h"
 
+
+/* -------------------------------------------
+- Thanks to https://github.com/trapexit/3dt for 3do image detection and filesystem extraction
+---------------------------------------------*/
+
+
 extern uint32_t start_Block;
 extern uint32_t nb_block_Block;
 extern uint8_t *buffer_Block;
@@ -224,6 +230,58 @@ static FRESULT processDir(FILINFO* fileInfo, char *path) {
   return res;
 }
 
+static bool is_3do_iso(uint8_t* buf) {
+  uint8_t VOLUME_SYNC_BYTES[] = {0x5A,0x5A,0x5A,0x5A,0x5A};
+
+  if(buf[0] != 0x01)
+    return false;
+
+  if(memcmp(&buf[1],&VOLUME_SYNC_BYTES[0],sizeof(VOLUME_SYNC_BYTES)) != 0)
+    return false;
+
+  if(buf[6] != 0x01)
+    return false;
+
+  return true;
+}
+
+
+static bool is_mode1_2352(uint8_t* buf) {
+  uint8_t MODE1_SYNC_PATTERN[] = {0x00,0xFF,0xFF,0xFF, 0xFF,0xFF,0xFF,0xFF, 0xFF,0xFF,0xFF,0x00};
+  if(memcmp(&buf[0],&MODE1_SYNC_PATTERN[0],sizeof(MODE1_SYNC_PATTERN))!= 0)
+    return false;
+
+  if(buf[0x0F] != 0x01)
+    return false;
+
+  return is_3do_iso(&buf[0x10]);
+}
+
+static bool isA3doImage(char * path) {
+  FIL myFile;
+  FRESULT fr;
+  uint8_t buf[0x20];
+  uint read_nb = 0;
+  bool ret = false;
+  fr = f_open(&myFile, path, FA_READ);
+  if (fr){
+    return false;
+  }
+
+  if (f_read(&myFile, &buf, 0x20, &read_nb) != FR_OK) {
+    f_close(&myFile);
+    return false;
+  }
+  if (read_nb != 0x20)  {
+    f_close(&myFile);
+    return false;
+  }
+
+  ret = ((is_mode1_2352(&buf[0])) || (is_3do_iso(&buf[0])));
+  f_close(&myFile);
+  return ret;
+}
+
 static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
   FIL myFile;
   UINT i = strlen(fileInfo->fname);
@@ -275,6 +333,10 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
             if (strncmp(line_end, "MODE1", 5) == 0)
             {
               // Figure out the track sector size
+              if (!isA3doImage(allImage[nb_img].BinPath)) {
+                valid = false;
+                break;
+              }
               allImage[nb_img].info.block_size =  atoi(line_end + 6);
               allImage[nb_img].info.block_size_read = 2048;
               allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x4;
@@ -378,12 +440,8 @@ static void ExtractInfofromIso(FILINFO *fileInfo, char* path) {
   FRESULT fr;
   char *newPath = malloc(strlen(path)+i+2);
   sprintf(&newPath[0], "%s\\%s", path, fileInfo->fname);
-  fr = f_open(&myFile, newPath, FA_READ);
-  if (fr){
-     printf("can not open %s for reading\n",newPath);
-     return;
-  } else {
-    f_close(&myFile);
+  if (!isA3doImage(newPath)) {
+    return;
   }
   if ((fileInfo->fsize % 2352)==0) {
     allImage[nb_img].info.block_size = 2352;
