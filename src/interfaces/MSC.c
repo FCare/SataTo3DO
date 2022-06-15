@@ -107,16 +107,17 @@ static void print_error_text(FRESULT e) {
 
 static void check_subq() {
   if (subqRequired) {
+    bool found = false;
     usb_state |= COMMAND_ON_GOING;
-    cd_s *target_track = &allImage[selected_img].info;
-    FIL *fileOpen = &allImage[selected_img].File;
+    cd_s *target_track = &currentDisc;
     memset(buffer_subq, 0x0, 16);
-    uint lba = start_Block;
+    uint lba = start_Block + 150;
     buffer_subq[9] =  lba/(60*75);
     lba %= 60*75;
     buffer_subq[10] = lba / 75;
     buffer_subq[11] = lba % 75;
-    for (int i = 0; i<allImage[nb_img].info.last_track; i++)
+    lba = start_Block;
+    for (int i = 0; i<target_track->last_track; i++)
     {
       if (target_track->tracks[i].lba <= start_Block) {
         buffer_subq[5] = target_track->tracks[i].CTRL_ADR;
@@ -127,6 +128,7 @@ static void check_subq() {
         lba %= 60*75;
         buffer_subq[14] = lba / 75;
         buffer_subq[15] = lba % 75;
+        found = true;
       } else {
         break;
       }
@@ -145,8 +147,7 @@ static void check_block() {
     cd_s *target_track = &allImage[selected_img].info;
     FIL *fileOpen = &allImage[selected_img].File;
     uint read_nb = 0;
-    uint offset = (start_Block - target_track->tracks[0].lba)*currentDisc.block_size;
-    uint block_size_to_read = currentDisc.block_size_read;
+    FSIZE_t offset = (start_Block - target_track->tracks[0].lba)*currentDisc.block_size;
     if (currentDisc.block_size != currentDisc.block_size_read) {
       if (currentDisc.format != 0) {
         //Assuming a XA format has only MODE_2 and CDDA track
@@ -166,26 +167,23 @@ static void check_block() {
     if (is_audio) {
       if (has_subQ) {
         //Work only for 1 block here
-        //If audio read without subQ, it might not work
-        if (f_read(fileOpen, &buffer_Block[0], 2448, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
+        FSIZE_t data_offset = 0;
+
+          if (f_read(fileOpen, &buffer_Block[data_offset], currentDisc.block_size, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
+          data_offset += read_nb;
+          for (int i = currentDisc.block_size; i < currentDisc.block_size_read; i++) {
+            buffer_Block[data_offset++] = 0;
+          }
       } else {
-        for (int i=0; i<98; i++)
-        {
-          if (f_read(fileOpen, &buffer_Block[24*i], 24, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
-          if (f_read(fileOpen, &buffer_Block[24*(i+1)], 8, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
-        }
+        if (f_read(fileOpen, &buffer_Block[0], currentDisc.block_size_read, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
       }
     } else {
       if (f_read(fileOpen, buffer_Block, nb_block_Block*currentDisc.block_size_read, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
       if (read_nb != nb_block_Block*currentDisc.block_size_read) printf("Bad read %d %d\n", read_nb, nb_block_Block*currentDisc.block_size_read);
     }
-    // printf("Seek %d bytes\n", (start_Block - target_track->tracks[0].lba)*currentDisc.block_size_read);
-
-    // else printf("Read done\n");
     usb_state &= ~COMMAND_ON_GOING;
     blockRequired = false;
     read_done = true;
-    //ouvrir le fichier en offset.
   }
 }
 
@@ -278,7 +276,7 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
               // Figure out the track sector size
               allImage[nb_img].info.block_size =  atoi(line_end + 6);
               allImage[nb_img].info.block_size_read = 2048;
-              allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x4;
+              allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x41;
               allImage[nb_img].info.tracks[track_num - 1].id = track_num;
               allImage[nb_img].info.tracks[track_num - 1].mode = MODE_1;
             }
@@ -288,16 +286,16 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
               // Figure out the track sector size
               allImage[nb_img].info.block_size = allImage[nb_img].info.block_size_read = atoi(line_end + 6);
               allImage[nb_img].info.block_size_read = 2048;
-              allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x4;
+              allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x41;
               allImage[nb_img].info.tracks[track_num - 1].id = track_num;
               allImage[nb_img].info.tracks[track_num - 1].mode = MODE_2;
             }
             else if (strncmp(line_end, "AUDIO", 5) == 0)
             {
               // Update toc entry
-              allImage[nb_img].info.block_size = 2448; //(98 * (24+1)) - 2
+              allImage[nb_img].info.block_size = 2352; //(98 * (24))
               allImage[nb_img].info.block_size_read = 2352; // 98*24
-              allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x0;
+              allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x1;
               allImage[nb_img].info.tracks[track_num - 1].id = track_num;
               allImage[nb_img].info.tracks[track_num - 1].mode = CDDA;
             }

@@ -140,7 +140,7 @@ bool isAudioBlock(uint32_t start) {
   return res;
 }
 
-bool readBlock(uint32_t start, uint16_t nb_block, uint8_t block_size, uint8_t *buffer) {
+bool readBlock(uint32_t start, uint16_t nb_block, uint16_t block_size, uint8_t *buffer) {
   is_audio = false;
   has_subQ = false;
   read_done = false;
