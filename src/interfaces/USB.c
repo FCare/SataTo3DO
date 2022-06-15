@@ -17,14 +17,18 @@ void USB_Host_init() {
     tusb_init();
 }
 
+static bool check_eject();
+
 static bool Default_Host_loop() {
   #if CFG_TUH_MSC
     if(usb_state & ENUMERATED) {
       if (!(usb_state & COMMAND_ON_GOING)) {
-        if (usb_state & DISC_MOUNTED) {
-          return true;
-        } else {
-          return false;
+        if (!check_eject()) {
+          if (usb_state & DISC_MOUNTED) {
+            return true;
+          } else {
+            return false;
+          }
         }
       }
     }
@@ -80,6 +84,17 @@ bool blockRequired = false;
 bool subqRequired = false;
 uint8_t *buffer_subq;
 
+static bool check_eject() {
+  if (requestEject!=-1) {
+    //Execute right now
+    LOG_SATA("Eject %d\n", requestEject);
+    if (CDROM_ExecuteEject(requestEject != 0))
+      requestEject = -1;
+    return true;
+  }
+  return false;
+}
+
 void USB_reset(void) {
   printf("reset usb\n");
   usb_state = 0;
@@ -117,7 +132,9 @@ bool driveEject(bool eject) {
     requestEject = (eject?0:1);
     return true;
   }
-  if (requestEject != -1) return false;
+  if (requestEject != -1) {
+    return false;
+  }
   requestEject = (eject?0:1);
   return true;
 }

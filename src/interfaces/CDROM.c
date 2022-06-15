@@ -49,16 +49,21 @@ uint8_t readBuffer[20480];
 extern volatile bool is_audio;
 extern volatile bool has_subQ;
 
+static bool retryEject = false;
+
 static bool command_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
-  if ((csw->status != MSC_CSW_STATUS_PASSED) && (currentDisc.mounted)) {
-    set3doDriveError();
+  if (csw->status != MSC_CSW_STATUS_PASSED) {
+    if (currentDisc.mounted) {
+      set3doDriveError();
+    }
+    requestEject = (retryEject)?1:0;
   }
   usb_state &= ~COMMAND_ON_GOING;
 }
 
 bool CDROM_ExecuteEject(bool eject) {
   usb_state |= COMMAND_ON_GOING;
-  printf("ExecuteEject %d\n", eject);
+  retryEject = eject;
   if ( !tuh_msc_start_stop(currentDisc.dev_addr, currentDisc.lun, eject, true, command_complete_cb)) {
     LOG_SATA("Got error while eject command\n");
   }
@@ -144,7 +149,6 @@ static bool setCDSpeed(uint16_t speed) {
 
 static bool read_header_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   usb_state &= ~COMMAND_ON_GOING;
-  printf("format %x\n", readBuffer[0]);
   if (readBuffer[0] == 0x2) {
     /* 00h - audio; 01h - Mode 1 (games) - Mode 2 (CD-XA photoCD) */
     //Photo CD shall have an audio track. CD-i are Mode 2 but without audio.
