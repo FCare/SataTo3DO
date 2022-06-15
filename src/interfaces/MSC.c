@@ -147,7 +147,8 @@ static void check_block() {
     cd_s *target_track = &allImage[selected_img].info;
     FIL *fileOpen = &allImage[selected_img].File;
     uint read_nb = 0;
-    FSIZE_t offset = (start_Block - target_track->tracks[0].lba)*currentDisc.block_size;
+    FSIZE_t offset = (start_Block - target_track->tracks[0].lba)*currentDisc.block_size + currentDisc.offset;
+    // printf("Read %lu %lu %lu %lu\n", offset, currentDisc.offset, start_Block,target_track->tracks[0].lba);
     if (currentDisc.block_size != currentDisc.block_size_read) {
       if (currentDisc.format != 0) {
         //Assuming a XA format has only MODE_2 and CDDA track
@@ -276,7 +277,7 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
               // Figure out the track sector size
               allImage[nb_img].info.block_size =  atoi(line_end + 6);
               allImage[nb_img].info.block_size_read = 2048;
-              allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x41;
+              allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x4;
               allImage[nb_img].info.tracks[track_num - 1].id = track_num;
               allImage[nb_img].info.tracks[track_num - 1].mode = MODE_1;
             }
@@ -286,7 +287,7 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
               // Figure out the track sector size
               allImage[nb_img].info.block_size = allImage[nb_img].info.block_size_read = atoi(line_end + 6);
               allImage[nb_img].info.block_size_read = 2048;
-              allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x41;
+              allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x4;
               allImage[nb_img].info.tracks[track_num - 1].id = track_num;
               allImage[nb_img].info.tracks[track_num - 1].mode = MODE_2;
             }
@@ -295,7 +296,7 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
               // Update toc entry
               allImage[nb_img].info.block_size = 2352; //(98 * (24))
               allImage[nb_img].info.block_size_read = 2352; // 98*24
-              allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x1;
+              allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x0;
               allImage[nb_img].info.tracks[track_num - 1].id = track_num;
               allImage[nb_img].info.tracks[track_num - 1].mode = CDDA;
             }
@@ -371,9 +372,69 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
   }
 }
 
+static void ExtractInfofromIso(FILINFO *fileInfo, char* path) {
+  FIL myFile;
+  UINT i = strlen(fileInfo->fname);
+  FRESULT fr;
+  char *newPath = malloc(strlen(path)+i+2);
+  sprintf(&newPath[0], "%s\\%s", path, fileInfo->fname);
+  fr = f_open(&myFile, newPath, FA_READ);
+  if (fr){
+     printf("can not open %s for reading\n",newPath);
+     return;
+  } else {
+    f_close(&myFile);
+  }
+  if ((fileInfo->fsize % 2352)==0) {
+    allImage[nb_img].info.block_size = 2352;
+    allImage[nb_img].info.offset = 16;
+  } else if ((fileInfo->fsize % 2048)==0) {
+    allImage[nb_img].info.block_size = 2048;
+    allImage[nb_img].info.offset = 0;
+  } else {
+    //Bad format
+    printf("File is %d bytes length\n", fileInfo->fsize);
+    free(newPath);
+    return;
+  }
+
+  printf("Game %d: Read %s\n", nb_img, newPath);
+
+  if (allImage[nb_img].BinPath != NULL) free(allImage[nb_img].BinPath);
+  allImage[nb_img].BinPath = newPath;
+
+  allImage[nb_img].info.block_size_read = allImage[nb_img].info.block_size;
+
+  allImage[nb_img].info.nb_block = fileInfo->fsize / allImage[nb_img].info.block_size;
+
+  allImage[nb_img].info.first_track = 1;
+  allImage[nb_img].info.last_track = 1;
+  allImage[nb_img].info.nb_track = 1;
+  allImage[nb_img].info.hasOnlyAudio = false;
+  allImage[nb_img].info.format = 0x0; //MODE1 always
+
+  allImage[nb_img].info.tracks[0].CTRL_ADR = 0x4;
+
+  allImage[nb_img].info.tracks[0].msf[0] = 0;
+  allImage[nb_img].info.tracks[0].msf[1] = 2;
+  allImage[nb_img].info.tracks[0].msf[2] = 0;
+  allImage[nb_img].info.tracks[0].lba = 0;
+  allImage[nb_img].info.tracks[0].mode = MODE_1;
+
+  int lba = allImage[nb_img].info.nb_block + 150;
+  allImage[nb_img].info.msf[0] = lba/(60*75);
+  lba %= 60*75;
+  allImage[nb_img].info.msf[1] = lba / 75;
+  allImage[nb_img].info.msf[2] = lba % 75;
+  nb_img++;
+}
+
 static void processFile(FILINFO* fileInfo, char* path) {
   if (f_path_contains(fileInfo->fname,"*.cue")){
     ExtractInfofromCue(fileInfo, path);
+  }
+  if (f_path_contains(fileInfo->fname,"*.iso")){
+      ExtractInfofromIso(fileInfo, path);
   }
 }
 
@@ -410,7 +471,7 @@ bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
     }
     processFileorDir(&fileInfo);
   }
-  selected_img = 13;
+  selected_img = 19;
   memcpy(&currentDisc, &allImage[selected_img].info, sizeof(cd_s));
   if (f_open(&allImage[selected_img].File, allImage[selected_img].BinPath, FA_READ) == FR_OK) {
     currentDisc.mounted = true;
@@ -418,6 +479,8 @@ bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
     usb_state &= ~COMMAND_ON_GOING;
     set3doCDReady(true);
     set3doDriveMounted(true);
+  } else {
+    printf("Can not open the Game!\n");
   }
 }
 

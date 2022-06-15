@@ -31,6 +31,7 @@ typedef struct {
   uint8_t lun;
   bool hasOnlyAudio;
   track_s tracks[100];
+  uint8_t offset;
 } cd_s;
 
 extern cd_s currentDisc;
