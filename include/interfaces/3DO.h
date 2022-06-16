@@ -12,6 +12,16 @@
 #define DATA_6 8
 #define DATA_7 9
 
+#ifdef OLD_PCB
+#define CTRL0 10
+#define CTRL1 11
+#define CTRL2 12
+#define CTRL3 13
+#define CTRL4 14
+#define CTRL5 15
+#define CTRL6 26
+#define CTRL7 27
+#else
 #define CTRL7 10
 #define CTRL0 11
 #define CTRL1 12
@@ -20,6 +30,8 @@
 #define CTRL4 15
 #define CTRL5 26
 #define CTRL6 27
+#endif
+
 #define CTRL8 28
 
 #define EJECT_3V 29
