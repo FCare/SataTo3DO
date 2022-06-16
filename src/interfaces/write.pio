@@ -5,11 +5,8 @@
 
 ; Pin list shall be  CDEN, CDHWR, CDCMD, CDD7, CDD6, CDD5, CDD4, CDD3, CDD2, CDD1, CDD0
 
-#ifdef OLD_PCB
-.define CDHRD 13
-#else
+; .define CDHRD 13
 .define CDHRD 14
-#endif
 
 public entry_point:
 .wrap_target
