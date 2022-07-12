@@ -839,9 +839,9 @@ void _3DO_init() {
   gpio_set_dir_masked(DATA_BUS_MASK, DATA_BUS_MASK);
   gpio_init_mask(DATA_BUS_MASK);
 
-  for (int i = 0; i<32; i++) {
-    gpio_set_drive_strength(i, GPIO_DRIVE_STRENGTH_12MA);
-  }
+  // for (int i = 0; i<32; i++) {
+  //   gpio_set_drive_strength(i, GPIO_DRIVE_STRENGTH_12MA);
+  // }
 
   sm_read = CHAN_MAX;
   offset = pio_add_program(pio0, &read_program);
