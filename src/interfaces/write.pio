@@ -5,14 +5,20 @@
 
 ; Pin list shall be  CDEN, CDHWR, CDCMD, CDD7, CDD6, CDD5, CDD4, CDD3, CDD2, CDD1, CDD0
 
-; .define CDHRD 13
 .define CDHRD 14
 
 public entry_point:
 .wrap_target
     pull block
+wait_start:
     wait 0 pin CDHRD ;wait for request to read
+    jmp pin invalid
     out pins,8 ;output data
+    jmp continue
+invalid:
+    wait 1 pin CDHRD ;wait for end of request
+    jmp wait_start
+continue:
     wait 1 pin CDHRD ;wait for end of request
 .wrap
 
@@ -23,6 +29,8 @@ static inline void write_program_init(PIO pio, uint sm, uint offset) {
 
     sm_config_set_out_pins(&c, CDD0, 8);
     sm_config_set_out_shift(&c, true, false, 8);
+
+    sm_config_set_jmp_pin(&c, CDEN);
 
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
 

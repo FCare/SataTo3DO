@@ -5,22 +5,18 @@
 
 ; Pin list shall be  CDEN, CDHWR, CDCMD, CDD7, CDD6, CDD5, CDD4, CDD3, CDD2, CDD1, CDD0
 
-;.define CDHWR 14
-;.define RST   15
 .define CDHWR 15
-.define RST   26
-.define CDEN  28
 
 public entry_point:
 .wrap_target
     wait 0 gpio CDHWR
+    jmp pin invalid
     in pins, 32
+invalid:
     wait 1 gpio CDHWR
 .wrap
 
 % c-sdk {
-
-#define READ_PIN_COUNT 11
 
 static inline void read_program_init_pin(PIO pio, uint sm, bool active) {
 }
@@ -31,6 +27,8 @@ static inline void read_program_init(PIO pio, uint sm, uint offset) {
     sm_config_set_in_pins(&c, 0);
     sm_config_set_in_shift(&c, true, true, 32);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+    sm_config_set_jmp_pin(&c, CDEN);
 
     pio_sm_set_pindirs_with_mask(pio, sm, 0x0, 0xFF<<CDD0);
 

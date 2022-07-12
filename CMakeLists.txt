@@ -5,7 +5,7 @@ set(FAMILY rp2040)
 set(BOARD pico_sdk)
 set(PICO_TINYUSB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tinyusb")
 
-set(PICO_BOARD waveshare_rp2040_zero)
+set(PICO_BOARD waveshare_rp2040_plus_4mb)
 
 set(PICO_STACK_SIZE _u(0x1000))
 
@@ -48,7 +48,6 @@ pico_generate_pio_header(SataTo3DO ${CMAKE_CURRENT_LIST_DIR}/src/interfaces/writ
 # pico_enable_stdio_usb(SataTo3DO 1)
 option(USE_DEBUG "Use the UART RX/TX" ON)
 if (USE_DEBUG)
-	add_definitions(-DUSE_UART_RX=1)
   pico_enable_stdio_uart(SataTo3DO 1)
 endif()
 

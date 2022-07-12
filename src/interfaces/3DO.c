@@ -14,6 +14,9 @@
 
 #define DATA_BUS_MASK (0xFF<<CDD0)
 
+#define DATA_IN 0
+#define DATA_OUT 1
+
 #include "read.pio.h"
 
 #include "write.pio.h"
@@ -228,6 +231,14 @@ void print_dma_ctrl(dma_channel_hw_t *channel) {
            ctrl & DMA_CH0_CTRL_TRIG_EN_BITS ? 1 : 0);
 }
 
+void setDataDir(int value) {
+  gpio_put(DIR_DATA, value);
+  if (value == DATA_IN) {
+      pio_sm_drain_tx_fifo(pio0, sm_read);
+  }
+}
+
+
 void restartPio(uint8_t channel) {
   pio_sm_drain_tx_fifo(pio0, sm[channel]);
   pio_sm_restart(pio0, sm[channel]);
@@ -243,12 +254,14 @@ void sendAnswer(uint8_t *buffer, uint32_t nbWord, uint8_t access) {
   restartPio(access);
   startDMA(access, buffer, nbWord);
   pio_sm_set_consecutive_pindirs(pio0, sm[access], CDD0, 8, true);
+  setDataDir(DATA_OUT); //Output data
   gpio_put(CDSTEN + access, 0x0);
 
   dma_channel_wait_for_finish_blocking(access);
   while(!pio_sm_is_tx_fifo_empty(pio0, sm[access]));
   while (pio_sm_get_pc(pio0, sm[access]) != sm_offset[access]);
   gpio_put(CDSTEN + access, 0x1);
+  setDataDir(DATA_IN); //input data
   pio_sm_set_consecutive_pindirs(pio0, sm[access], CDD0, 8, false);
   pio_sm_set_enabled(pio0, sm[access], false);
 }
@@ -265,6 +278,7 @@ bool sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
   if (trace) c= get_absolute_time();
   pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_DATA], CDD0, 8, true);
   if (trace)  d= get_absolute_time();
+  setDataDir(DATA_OUT); //Output data
   gpio_put(CDDTEN, 0x0);
   if (trace) e= get_absolute_time();
   absolute_time_t start = get_absolute_time();
@@ -280,6 +294,7 @@ bool sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
     }
     if((absolute_time_diff_us(start,get_absolute_time()) > 100) && (!statusStarted) && canBeInterrupted && last) {
       statusStarted = true;
+      setDataDir(DATA_OUT);
       gpio_put(CDSTEN, 0x0);
     }
 
@@ -293,6 +308,7 @@ bool sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
       pio_sm_set_enabled(pio0, sm[CHAN_WRITE_DATA], false);
       pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_DATA], CDD0, 8, false);
       gpio_put(CDDTEN, true);
+      setDataDir(DATA_IN); //Input data
       return false;
     }
 
@@ -307,6 +323,7 @@ bool sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
   while(!pio_sm_is_tx_fifo_empty(pio0, sm[CHAN_WRITE_DATA]));
   while (pio_sm_get_pc(pio0, sm[CHAN_WRITE_DATA]) != sm_offset[CHAN_WRITE_DATA]);
   gpio_put(CDDTEN, 0x1);
+  setDataDir(DATA_IN); //Input data
   if (!interrupted && last) sendAnswer(buffer_status, nbStatus, CHAN_WRITE_STATUS);
   else pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_DATA], CDD0, 8, false);
   pio_sm_set_enabled(pio0, sm[CHAN_WRITE_DATA], false);
@@ -370,10 +387,8 @@ void handleCommand(uint32_t data) {
   uint8_t subBuffer[16];
   uint index = 0;
 
-#ifndef USE_UART_RX
-  gpio_set(LED, ledState);
+  gpio_put(LED, ledState);
   ledState = !ledState;
-#endif
 
   switch(request) {
     case READ_ID:
@@ -808,17 +823,18 @@ void _3DO_init() {
   gpio_put(CDDTEN, 1);
   gpio_set_dir(CDDTEN, true);
 
-#ifndef USE_UART_RX
   gpio_init(LED);
   gpio_set_dir(LED, true);
-#endif
-
 
   gpio_init(CDHRD);
   gpio_set_dir(CDHRD, false);
 
   gpio_init(CDHWR);
   gpio_set_dir(CDHWR, false);
+
+  gpio_init(DIR_DATA);
+  gpio_put(DIR_DATA, DATA_IN); //Input data
+  gpio_set_dir(DIR_DATA, true);
 
   gpio_set_dir_masked(DATA_BUS_MASK, DATA_BUS_MASK);
   gpio_init_mask(DATA_BUS_MASK);
