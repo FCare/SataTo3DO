@@ -114,6 +114,8 @@ uint instr_restart;
 
 uint nbWord = 0;
 
+static bool use_cdrom = false;
+
 volatile bool interrupt = false;
 
 uint8_t errorCode = POWER_OR_RESET_OCCURED;
@@ -757,44 +759,51 @@ void core1_entry() {
 
   LOG_SATA("Ready\n");
   while (1){
-    if (!gpio_get(CDRST)) {
-      reset_occured = true;
 
-      wait_out_of_reset();
-      errorCode |= POWER_OR_RESET_OCCURED;
-      status |= CHECK_ERROR;
-    }
-    if (gpio_get(CDEN)) {
-      LOG_SATA("CD is not enabled\n");
-      while(gpio_get(CDEN));
-      LOG_SATA("CD is enabled now\n");
-    }
-
-    bool ejectCurrent = gpio_get(EJECT);
-    if (ejectCurrent != ejectState) {
-        if (!debounceEject) s = get_absolute_time();
-        debounceEject = true;
-        if (absolute_time_diff_us(s, get_absolute_time()) > 2000) {
-          ejectState = ejectCurrent;
-          //Eject button pressed, toggle tray position
-          if (!ejectCurrent) {
-            close_tray((status & DOOR_CLOSED) == 0);
-          }
-          debounceEject = false;
-        }
+    if (use_cdrom) {
+      gpio_put(CDRST_SNIFF, gpio_get(CDRST));
+      gpio_put(CDEN_SNIFF, gpio_get(CDEN));
     } else {
-        if (debounceEject && (absolute_time_diff_us(s, get_absolute_time()) > 2000)) debounceEject = false;
-    }
+      if (!gpio_get(CDRST)) {
+        reset_occured = true;
 
-    reset_occured = false;
-    if (is3doData()) {
-      data_in = get3doData();
-      handleCommand(data_in);
+        wait_out_of_reset();
+        errorCode |= POWER_OR_RESET_OCCURED;
+        status |= CHECK_ERROR;
+      }
+      if (gpio_get(CDEN)) {
+        LOG_SATA("CD is not enabled\n");
+        while(gpio_get(CDEN));
+        LOG_SATA("CD is enabled now\n");
+      }
+
+      bool ejectCurrent = gpio_get(EJECT);
+      if (ejectCurrent != ejectState) {
+          if (!debounceEject) s = get_absolute_time();
+          debounceEject = true;
+          if (absolute_time_diff_us(s, get_absolute_time()) > 2000) {
+            ejectState = ejectCurrent;
+            //Eject button pressed, toggle tray position
+            if (!ejectCurrent) {
+              close_tray((status & DOOR_CLOSED) == 0);
+            }
+            debounceEject = false;
+          }
+      } else {
+          if (debounceEject && (absolute_time_diff_us(s, get_absolute_time()) > 2000)) debounceEject = false;
+      }
+
+      reset_occured = false;
+      if (is3doData()) {
+        data_in = get3doData();
+        handleCommand(data_in);
+      }
     }
   }
 }
 
 void _3DO_init() {
+  // use_cdrom = true;
   uint offset = -1;
 
   gpio_init(CDRST);
@@ -805,26 +814,26 @@ void _3DO_init() {
 
   gpio_init(CDWAIT);
   gpio_put(CDWAIT, 1);  //CDWAIT is always 1
-  gpio_set_dir(CDWAIT, true);
+  gpio_set_dir(CDWAIT, (!use_cdrom));
 
   gpio_init(CDEN);
   gpio_set_dir(CDEN, false);
 
   gpio_init(CDMDCHG);
   gpio_put(CDMDCHG, 1);
-  gpio_set_dir(CDMDCHG, true);
+  gpio_set_dir(CDMDCHG, (!use_cdrom));
 
 
   gpio_init(CDSTEN);
   gpio_put(CDSTEN, 1);
-  gpio_set_dir(CDSTEN, true);
+  gpio_set_dir(CDSTEN, (!use_cdrom));
 
   gpio_init(CDDTEN);
   gpio_put(CDDTEN, 1);
-  gpio_set_dir(CDDTEN, true);
+  gpio_set_dir(CDDTEN, (!use_cdrom));
 
   gpio_init(LED);
-  gpio_set_dir(LED, true);
+  gpio_set_dir(LED, (!use_cdrom));
 
   gpio_init(CDHRD);
   gpio_set_dir(CDHRD, false);
@@ -834,27 +843,34 @@ void _3DO_init() {
 
   gpio_init(DIR_DATA);
   gpio_put(DIR_DATA, DATA_IN); //Input data
-  gpio_set_dir(DIR_DATA, true);
+  gpio_set_dir(DIR_DATA,  (!use_cdrom));
 
   gpio_set_dir_masked(DATA_BUS_MASK, DATA_BUS_MASK);
   gpio_init_mask(DATA_BUS_MASK);
 
-  // for (int i = 0; i<32; i++) {
-  //   gpio_set_drive_strength(i, GPIO_DRIVE_STRENGTH_12MA);
-  // }
+  gpio_init(CDRST_SNIFF);
+  gpio_put(CDRST_SNIFF, 0);
+  gpio_set_dir(CDRST_SNIFF, (!use_cdrom));
 
-  sm_read = CHAN_MAX;
-  offset = pio_add_program(pio0, &read_program);
-  read_program_init(pio0, sm_read, offset);
+  gpio_init(CDEN_SNIFF);
+  gpio_put(CDEN_SNIFF, 1);
+  gpio_set_dir(CDEN_SNIFF, (!use_cdrom));
 
-  pio_gpio_init(pio0, CDD0);
-  pio_gpio_init(pio0, CDD1);
-  pio_gpio_init(pio0, CDD2);
-  pio_gpio_init(pio0, CDD3);
-  pio_gpio_init(pio0, CDD4);
-  pio_gpio_init(pio0, CDD5);
-  pio_gpio_init(pio0, CDD6);
-  pio_gpio_init(pio0, CDD7);
+  if (!use_cdrom) {
+    sm_read = CHAN_MAX;
+    offset = pio_add_program(pio0, &read_program);
+    read_program_init(pio0, sm_read, offset);
+
+    pio_gpio_init(pio0, CDD0);
+    pio_gpio_init(pio0, CDD1);
+    pio_gpio_init(pio0, CDD2);
+    pio_gpio_init(pio0, CDD3);
+    pio_gpio_init(pio0, CDD4);
+    pio_gpio_init(pio0, CDD5);
+    pio_gpio_init(pio0, CDD6);
+    pio_gpio_init(pio0, CDD7);
+  }
+
 
   LOG_SATA("wait for msg now\n");
 
