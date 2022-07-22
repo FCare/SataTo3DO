@@ -397,7 +397,8 @@ void handleCommand(uint32_t data) {
     for (int i=0; i<6; i++) {
       data_in[i] = get3doData();
     }
-      LOG_SATA("READ ID\n");
+
+    LOG_SATA("READ ID\n");
       if (errorOnDisk != 0) errorOnDisk++;
       buffer[index++] = READ_ID;
       buffer[index++] =0x00; //manufacture Id
@@ -857,9 +858,15 @@ void _3DO_init() {
   gpio_set_dir(CDEN_SNIFF, (!use_cdrom));
 
   if (!use_cdrom) {
+
     sm_read = CHAN_MAX;
     offset = pio_add_program(pio0, &read_program);
     read_program_init(pio0, sm_read, offset);
+
+
+    for (int i = 0; i<32; i++) {
+       gpio_set_drive_strength(i, GPIO_DRIVE_STRENGTH_12MA);
+    }
 
     pio_gpio_init(pio0, CDD0);
     pio_gpio_init(pio0, CDD1);

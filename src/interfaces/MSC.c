@@ -530,7 +530,7 @@ bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
     }
     processFileorDir(&fileInfo);
   }
-  selected_img = 19;
+  selected_img = 16;
   memcpy(&currentDisc, &allImage[selected_img].info, sizeof(cd_s));
   if (f_open(&allImage[selected_img].File, allImage[selected_img].BinPath, FA_READ) == FR_OK) {
     currentDisc.mounted = true;

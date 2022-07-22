@@ -43,7 +43,7 @@
 #define EJECT   EJECT_3V
 #define CDEN    CTRL8
 #define CDRST   CTRL5
-#define CDHRD   CTRL3
+#define CDHRD   XTRA2
 #define CDHWR   CTRL4
 #define CDCMD   CTRL7
 
