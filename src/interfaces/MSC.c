@@ -28,6 +28,8 @@ static void check_block();
 static void check_subq();
 #endif
 
+static FSIZE_t last_pos = 0;
+
 static FATFS  DiskFATState;
 static FIL file;
 
@@ -170,7 +172,9 @@ static void check_block() {
         }
       }
     }
-    if (f_lseek(fileOpen, offset) != FR_OK) printf("Can not seek %s\n", allImage[selected_img].BinPath);
+    if (last_pos != offset)
+      if (f_lseek(fileOpen, offset) != FR_OK) printf("Can not seek %s\n", allImage[selected_img].BinPath);
+    last_pos = offset;
     if (is_audio) {
       if (has_subQ) {
         //Work only for 1 block here
@@ -187,6 +191,7 @@ static void check_block() {
     } else {
       if (f_read(fileOpen, buffer_Block, nb_block_Block*currentDisc.block_size_read, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
       if (read_nb != nb_block_Block*currentDisc.block_size_read) printf("Bad read %d %d\n", read_nb, nb_block_Block*currentDisc.block_size_read);
+      last_pos += read_nb;
     }
     usb_state &= ~COMMAND_ON_GOING;
     blockRequired = false;
@@ -513,10 +518,7 @@ bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   result = f_mount(&DiskFATState, "" , 1);
   if (result!=FR_OK) return false;
 
-  char label[24];
-  label[0] = 0;
-  f_getlabel("", label, 0);
-  printf("Disk label = %s, root directory contains...\n",label);
+  printf("root directory contains...\n");
 
   static FILINFO fileInfo;
   DIR dirInfo;
@@ -530,9 +532,10 @@ bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
     }
     processFileorDir(&fileInfo);
   }
-  selected_img = 16;
+  selected_img = 19;
   memcpy(&currentDisc, &allImage[selected_img].info, sizeof(cd_s));
   if (f_open(&allImage[selected_img].File, allImage[selected_img].BinPath, FA_READ) == FR_OK) {
+    last_pos = 0;
     currentDisc.mounted = true;
     usb_state |= DISC_MOUNTED;
     usb_state &= ~COMMAND_ON_GOING;

@@ -352,9 +352,11 @@ void sendData(int startlba, int nb_block, bool trace) {
 
     readBlock(startlba, 1, currentDisc.block_size_read, &buffer[0]);
     if (trace) b= get_absolute_time();
-    while(!block_is_ready() && !errorOnDisk);
+    while(!block_is_ready() && !errorOnDisk && gpio_get(CDRST));
 
+    if (!gpio_get(CDRST)) return;
     if (isAudioBlock(startlba)) {
+      printf("audio Block\n");
       if (is_nil_time(lastPacket)) {
         lastPacket = delayed_by_us(get_absolute_time(),13333);
       } else {
