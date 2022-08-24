@@ -39,8 +39,6 @@ bool CDROM_Host_loop()
 // MACRO TYPEDEF CONSTANT ENUM DECLARATION
 //--------------------------------------------------------------------+
 
-volatile bool inquiry_cb_flag;
-
 static bool startClose = true;
 
 uint8_t readBuffer[20480];

@@ -70,9 +70,6 @@ volatile bool inquiry_cb_flag;
 
 static bool startClose = true;
 
-uint8_t readBuffer[20480];
-
-
 volatile bool read_done;
 volatile bool is_audio;
 volatile bool has_subQ;
