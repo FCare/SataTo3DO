@@ -12,7 +12,7 @@ int main(void)
 	_3DO_init();
 	sleep_ms(500);
 	USB_Host_init();
-	printf("Sata to 3DO\r\n");
+	LOG_SATA("SLOCODE 3DO\r\n");
 
 	while(1) {
 		// LCD_loop();

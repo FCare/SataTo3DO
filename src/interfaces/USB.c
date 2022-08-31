@@ -41,11 +41,11 @@ void USB_Host_loop()
   // tinyusb host task
   bool ret = true;
   tuh_task();
-  if (inquiry_resp.peripheral_device_type == 0x5) {
+  if ((usb_state & PERIPH_TYPE) == CD_TYPE) {
     ret = CDROM_Host_loop();
   }
 
-  else if (inquiry_resp.peripheral_device_type == 0x0) {
+  if ((usb_state & PERIPH_TYPE) == MSC_TYPE) {
     ret = MSC_Host_loop();
   }
   else {
@@ -93,7 +93,7 @@ static bool check_eject() {
 }
 
 void USB_reset(void) {
-  printf("reset usb\n");
+  LOG_SATA("reset usb\n");
   usb_state = 0;
   startClose = false;
   tuh_msc_umount_cb(currentDisc.dev_addr);
@@ -124,16 +124,27 @@ bool block_is_ready() {
   return read_done;
 }
 
-bool driveEject(bool eject) {
-  if (!usb_state & ENUMERATED) {
+bool USBDriveEject(bool eject, bool *interrupt) {
+  if ((usb_state & PERIPH_TYPE) == CD_TYPE) {
+    *interrupt = !eject;
+    if (!usb_state & ENUMERATED) {
+      requestEject = (eject?0:1);
+      LOG_SATA("usb not enumerated\n");
+      return true;
+    }
+    if (requestEject != -1) {
+      LOG_SATA("Eject already requested %d\n", requestEject);
+      return false;
+    }
     requestEject = (eject?0:1);
+    LOG_SATA("requesting eject %d\n", requestEject);
     return true;
   }
-  if (requestEject != -1) {
-    return false;
+  if ((usb_state & PERIPH_TYPE) == MSC_TYPE) {
+    *interrupt = true;
+    return true;
   }
-  requestEject = (eject?0:1);
-  return true;
+  return false;
 }
 
 
@@ -186,10 +197,12 @@ bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const
   currentDisc.lun = cbw->lun;
 
   if (inquiry_resp.peripheral_device_type == 0x5) {
+    usb_state |= CD_TYPE;
     return CDROM_Inquiry(dev_addr, cbw, csw);
   }
 
   if (inquiry_resp.peripheral_device_type == 0x0) {
+    usb_state |= MSC_TYPE;
     return MSC_Inquiry(dev_addr, cbw, csw);
   }
 

@@ -1,5 +1,5 @@
-#include "USB.h"
 #include "3DO.h"
+#include "MSC.h"
 #include "CDFormat.h"
 #include "pico/stdio.h"
 
@@ -10,6 +10,31 @@
 - Thanks to https://github.com/trapexit/3dt for 3do image detection and filesystem extraction
 ---------------------------------------------*/
 
+typedef struct dir_s{
+  DIR dir;
+  int nbSubDir;
+  struct dir_s *subDirs;
+} dir_t;
+
+dir_t *curDir = NULL;
+char *curPath = NULL;
+
+typedef enum {
+  BOOT_NONE = 0,
+  BOOT_ISO,
+  BOOT_PLAYLIST,
+} mount_mode;
+
+static mount_mode onMountMode = BOOT_NONE;
+
+#define PLAYLIST_MAX 16
+typedef struct playlist_entry_s{
+  char *path[PLAYLIST_MAX];
+  int nb_entries;
+  int current_entry;
+} playlist_entry;
+
+playlist_entry playlist = {0};
 
 extern uint32_t start_Block;
 extern uint32_t nb_block_Block;
@@ -21,10 +46,12 @@ extern uint8_t *buffer_subq;
 
 extern volatile bool read_done;
 
-#define SELECTED_IMAGE 20
+#define SELECTED_IMAGE 22
+
+#define TOC_NAME_LIMIT 128
 
 #if CFG_TUH_MSC
-// static bool check_eject();
+static bool check_eject();
 // static void check_speed();
 static void check_block();
 static void check_subq();
@@ -40,7 +67,7 @@ bool MSC_Host_loop()
   #if CFG_TUH_MSC
     if(usb_state & ENUMERATED) {
       if (!(usb_state & COMMAND_ON_GOING)) {
-        // if (!check_eject()) {
+        if (!check_eject()) {
           if (usb_state & DISC_MOUNTED) {
             // check_speed();
             check_block();
@@ -49,7 +76,7 @@ bool MSC_Host_loop()
           } else {
             return false;
           }
-        // }
+        }
       }
     }
     return true;
@@ -65,8 +92,8 @@ bool MSC_Host_loop()
 
 static bool startClose = true;
 
-static FRESULT processDir(FILINFO* fileInfo, char* path);
-static void processFile(FILINFO* fileInfo, char* path);
+static bool validateFile(FILINFO* fileInfo);
+static bool getNextValidToc(FILINFO *fileInfo);
 
 
 extern volatile bool is_audio;
@@ -74,15 +101,8 @@ extern volatile bool has_subQ;
 
 #define NB_SUPPORTED_GAMES 100
 
-typedef struct {
-  char* BinPath; //same number as tracks number
-  FIL File;
-  cd_s info;
-} bin_s;
-
-static bin_s allImage[NB_SUPPORTED_GAMES] = {0};
-int nb_img = 0;
-int selected_img = 0;
+char* curBinPath; //same number as tracks number
+FIL curFile;
 
 static void print_error_text(FRESULT e) {
   switch (e) {
@@ -110,6 +130,17 @@ static void print_error_text(FRESULT e) {
   }
   printf("\n");
 }
+
+static bool check_eject() {
+  if (requestEject!=-1) {
+    //Execute right now
+    LOG_SATA("Eject %d\n", requestEject);
+    requestEject = -1;
+    return true;
+  }
+  return false;
+}
+
 
 static void check_subq() {
   if (subqRequired) {
@@ -145,13 +176,52 @@ static void check_subq() {
   }
 }
 
+void printPlaylist(void) {
+  LOG_SATA("Playlist:\n");
+  for (int i =0; i<playlist.nb_entries; i++) {
+    LOG_SATA("%d: %s\n", i, playlist.path[i]);
+  }
+}
+
+void clearPlaylist(void) {
+  LOG_SATA("Clear laylist!\n");
+  for (int i=0; i<playlist.nb_entries; i++) {
+    if (playlist.path[i] != NULL) {
+      free(playlist.path[i]);
+      playlist.path[i] = NULL;
+    }
+  }
+  playlist.nb_entries = 0;
+  playlist.current_entry = 0;
+}
+
+
+void addToPlaylist(int entry, bool *valid, bool *added) {
+  char *entry_path = NULL;
+  entry_path = getPathForTOC(entry);
+  if (entry_path == NULL) {
+    *valid = false;
+    *added = false;
+    return;
+  }
+  *valid = true;
+  if (playlist.nb_entries >= PLAYLIST_MAX) {
+    *valid = false;
+    *added = false;
+    return;
+  }
+  *added = true;
+  playlist.path[playlist.nb_entries++] = entry_path;
+  LOG_SATA("Add to playlist %s %d\n", entry_path, playlist.nb_entries);
+}
+
 static void check_block() {
   if (blockRequired) {
     // printf("Block required %d %d %d %d\n",start_Block, allImage[selected_img].info.tracks[0].lba, nb_block_Block, currentDisc.block_size_read);
     usb_state |= COMMAND_ON_GOING;
 
-    cd_s *target_track = &allImage[selected_img].info;
-    FIL *fileOpen = &allImage[selected_img].File;
+    cd_s *target_track = &currentDisc;
+    FIL *fileOpen = &curFile;
     uint read_nb = 0;
     FSIZE_t offset = (start_Block - target_track->tracks[0].lba)*currentDisc.block_size + currentDisc.offset;
     // printf("Read %lu %lu %lu %lu\n", offset, currentDisc.offset, start_Block,target_track->tracks[0].lba);
@@ -171,66 +241,30 @@ static void check_block() {
       }
     }
     if (last_pos != offset)
-      if (f_lseek(fileOpen, offset) != FR_OK) printf("Can not seek %s\n", allImage[selected_img].BinPath);
+      if (f_lseek(fileOpen, offset) != FR_OK) LOG_SATA("Can not seek %s\n", curBinPath);
     last_pos = offset;
     if (is_audio) {
       if (has_subQ) {
         //Work only for 1 block here
         FSIZE_t data_offset = 0;
 
-          if (f_read(fileOpen, &buffer_Block[data_offset], currentDisc.block_size, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
+          if (f_read(fileOpen, &buffer_Block[data_offset], currentDisc.block_size, &read_nb) != FR_OK) LOG_SATA("Can not read %s\n", curBinPath);
           data_offset += read_nb;
           for (int i = currentDisc.block_size; i < currentDisc.block_size_read; i++) {
             buffer_Block[data_offset++] = 0;
           }
       } else {
-        if (f_read(fileOpen, &buffer_Block[0], currentDisc.block_size_read, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
+        if (f_read(fileOpen, &buffer_Block[0], currentDisc.block_size_read, &read_nb) != FR_OK) LOG_SATA("Can not read %s\n", curBinPath);
       }
     } else {
-      if (f_read(fileOpen, buffer_Block, nb_block_Block*currentDisc.block_size_read, &read_nb) != FR_OK) printf("Can not read %s\n", allImage[selected_img].BinPath);
-      if (read_nb != nb_block_Block*currentDisc.block_size_read) printf("Bad read %d %d\n", read_nb, nb_block_Block*currentDisc.block_size_read);
+      if (f_read(fileOpen, buffer_Block, nb_block_Block*currentDisc.block_size_read, &read_nb) != FR_OK) LOG_SATA("Can not read %s\n", curBinPath);
+      if (read_nb != nb_block_Block*currentDisc.block_size_read) LOG_SATA("Bad read %d %d\n", read_nb, nb_block_Block*currentDisc.block_size_read);
       last_pos += read_nb;
     }
     usb_state &= ~COMMAND_ON_GOING;
     blockRequired = false;
     read_done = true;
   }
-}
-
-static void processFileorDir(FILINFO* fileInfo) {
-  bool isDir = (fileInfo->fattrib & AM_DIR);
-  if (!(fileInfo->fname[0] == '.' || fileInfo->fattrib & (AM_HID | AM_SYS))) {  // skip hidden or system files
-    if (isDir) processDir(fileInfo, "0:");
-    else processFile(fileInfo, "0:");
-  }
-}
-
-static FRESULT processDir(FILINFO* fileInfo, char *path) {
-  FRESULT res;
-  DIR dir;
-  UINT i;
-  FILINFO* fno = malloc(sizeof(FILINFO));
-
-  i = strlen(fileInfo->fname);
-  char *newPath = malloc(strlen(path)+i+2);
-  sprintf(&newPath[0], "%s\\%s", path, fileInfo->fname);
-
-  res = f_opendir(&dir, fileInfo->fname);                       /* Open the directory */
-  if (res == FR_OK) {
-    for (;;) {
-        res = f_readdir(&dir, fno);                   /* Read a directory item */
-        if (res != FR_OK || fno->fname[0] == 0) break;  /* Break on error or end of dir */
-        if (fno->fattrib & AM_DIR) {                    /* It is a directory */
-            res = processDir(fno, newPath);                    /* Enter the directory */
-            if (res != FR_OK) break;
-        } else {                                       /* It is a file. */
-          processFile(fno, newPath);
-        }
-    }
-    f_closedir(&dir);
-  }
-  free(newPath);
-  return res;
 }
 
 static bool is_3do_iso(uint8_t* buf) {
@@ -285,47 +319,58 @@ static bool isA3doImage(char * path) {
   return ret;
 }
 
-static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
+static bool LoadfromCue(char *filePath) {
   FIL myFile;
-  UINT i = strlen(fileInfo->fname);
   FRESULT fr;
-  bool  valid = true;
+  bool  valid = false;
   char line[100];
   unsigned int track_num = 0;
-  char *newPath = malloc(strlen(path)+i+2);
-  sprintf(&newPath[0], "%s\\%s", path, fileInfo->fname);
-  fr = f_open(&myFile, newPath, FA_READ);
+  LOG_SATA("Load From Cue %s\n", filePath);
+  fr = f_open(&myFile, filePath, FA_READ);
   if (fr){
-     printf("can not open %s for reading\n",newPath);
-     return;
+     LOG_SATA("can not open %s for reading\n",filePath);
+     return false;
   }
 
-  printf("Game %d: Read %s\n", nb_img, newPath);
   // Time to generate TOC
   for (;;)
   {
+    currentDisc.nb_track = 0;
     /* Read every line and display it */
     while (f_gets(line, sizeof line, &myFile)) {
+      valid = true;
       char line_end[100];
       char line_start[100];
       if (sscanf(line, " %s %[^\r\n]\r\n", line_start, line_end) != EOF) {
         if (strncmp(line_start, "FILE", 4) == 0) {
           FILINFO binInfo;
           char filename[100];
+          char *lastDir = rindex(filePath, '\\');
+          char * testPath;
+          char *newPath = malloc(lastDir - filePath + 1);
+          memcpy(newPath, filePath, lastDir - filePath);
+          newPath[lastDir-filePath] = 0;
+
           sscanf(line_end, " \"%[^\"]\"", filename);
-          if (allImage[nb_img].BinPath != NULL) free(allImage[nb_img].BinPath);
-          allImage[nb_img].BinPath = malloc(strlen(path)+strlen(filename)+2);
-          sprintf(&allImage[nb_img].BinPath[0], "%s\\%s", path, filename);
-          fr = f_stat(allImage[nb_img].BinPath, &binInfo);
+          testPath = malloc(strlen(newPath)+strlen(filename)+2);
+          sprintf(&testPath[0], "%s\\%s", newPath, filename);
+          free(newPath);
+          if (curBinPath != NULL) free(curBinPath);
+          curBinPath = testPath;
+          fr = f_stat(curBinPath, &binInfo);
           if (fr == FR_NO_FILE) {
+            free(curBinPath);
+            curBinPath = NULL;
             valid = false;
             break; //Bin file does not exists
           }
           if (binInfo.fattrib & AM_DIR) {
+            free(curBinPath);
+            curBinPath = NULL;
             valid = false;
             break; //not a file
           }
-          allImage[nb_img].info.nb_block = binInfo.fsize;
+          currentDisc.nb_block = binInfo.fsize;
           continue;
         }
         if (strncmp(line_start, "TRACK", 5) == 0) {
@@ -336,40 +381,40 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
             if (strncmp(line_end, "MODE1", 5) == 0)
             {
               // Figure out the track sector size
-              if (!isA3doImage(allImage[nb_img].BinPath)) {
+              if (!isA3doImage(curBinPath)) {
                 valid = false;
                 break;
               }
-              allImage[nb_img].info.block_size =  atoi(line_end + 6);
-              allImage[nb_img].info.block_size_read = 2048;
-              allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x4;
-              allImage[nb_img].info.tracks[track_num - 1].id = track_num;
-              allImage[nb_img].info.tracks[track_num - 1].mode = MODE_1;
+              currentDisc.block_size =  atoi(line_end + 6);
+              currentDisc.block_size_read = 2048;
+              currentDisc.tracks[track_num - 1].CTRL_ADR = 0x4;
+              currentDisc.tracks[track_num - 1].id = track_num;
+              currentDisc.tracks[track_num - 1].mode = MODE_1;
             }
             else if (strncmp(line_end, "MODE2", 5) == 0)
             {
               //PhotoCD cue file
               // Figure out the track sector size
-              allImage[nb_img].info.block_size = allImage[nb_img].info.block_size_read = atoi(line_end + 6);
-              allImage[nb_img].info.block_size_read = 2048;
-              allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x4;
-              allImage[nb_img].info.tracks[track_num - 1].id = track_num;
-              allImage[nb_img].info.tracks[track_num - 1].mode = MODE_2;
+              currentDisc.block_size = currentDisc.block_size_read = atoi(line_end + 6);
+              currentDisc.block_size_read = 2048;
+              currentDisc.tracks[track_num - 1].CTRL_ADR = 0x4;
+              currentDisc.tracks[track_num - 1].id = track_num;
+              currentDisc.tracks[track_num - 1].mode = MODE_2;
             }
             else if (strncmp(line_end, "AUDIO", 5) == 0)
             {
-              // Update toc entry
-              allImage[nb_img].info.block_size = 2352; //(98 * (24))
-              allImage[nb_img].info.block_size_read = 2352; // 98*24
-              allImage[nb_img].info.tracks[track_num - 1].CTRL_ADR = 0x0;
-              allImage[nb_img].info.tracks[track_num - 1].id = track_num;
-              allImage[nb_img].info.tracks[track_num - 1].mode = CDDA;
+              // // Update toc entry
+              currentDisc.block_size = 2352; //(98 * (24))
+              currentDisc.block_size_read = 2352; // 98*24
+              currentDisc.tracks[track_num - 1].CTRL_ADR = 0x0;
+              currentDisc.tracks[track_num - 1].id = track_num;
+              currentDisc.tracks[track_num - 1].mode = CDDA;
             }
             else {
               valid = false;
               break;
             }
-            allImage[nb_img].info.nb_track++;
+            currentDisc.nb_track++;
           } else {
             valid = false;
             break;
@@ -386,10 +431,10 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
 
            if (indexnum == 1)
            {
-              allImage[nb_img].info.tracks[track_num - 1].msf[0] = min;
-              allImage[nb_img].info.tracks[track_num - 1].msf[1] = sec + 2;
-              allImage[nb_img].info.tracks[track_num - 1].msf[2] = frame;
-              allImage[nb_img].info.tracks[track_num - 1].lba = min*60*75+sec*75+frame;
+              currentDisc.tracks[track_num - 1].msf[0] = min;
+              currentDisc.tracks[track_num - 1].msf[1] = sec + 2;
+              currentDisc.tracks[track_num - 1].msf[2] = frame;
+              currentDisc.tracks[track_num - 1].lba = min*60*75+sec*75+frame;
            }
         }
 #ifdef USE_PRE_POST_GAP
@@ -408,140 +453,555 @@ static void ExtractInfofromCue(FILINFO *fileInfo, char* path) {
 #endif
       }
     }
-    if (valid) {
-      allImage[nb_img].info.first_track = 1;
-      allImage[nb_img].info.last_track = allImage[nb_img].info.nb_track;
-      allImage[nb_img].info.hasOnlyAudio = true;
-      allImage[nb_img].info.format = 0x0;
-      for (int i = 0; i<allImage[nb_img].info.last_track; i++)
-      {
-        if (allImage[nb_img].info.tracks[i].CTRL_ADR & 0x4) {
-          allImage[nb_img].info.hasOnlyAudio = false;
-        }
-        if (allImage[nb_img].info.tracks[i].mode == MODE_2){
-          allImage[nb_img].info.format = 0x20; //XA format
-        }
-      }
-      allImage[nb_img].info.nb_block /= allImage[nb_img].info.block_size;
-      int lba = allImage[nb_img].info.nb_block + 150;
-      allImage[nb_img].info.msf[0] = lba/(60*75);
-      lba %= 60*75;
-      allImage[nb_img].info.msf[1] = lba / 75;
-      allImage[nb_img].info.msf[2] = lba % 75;
-      nb_img++;
-    }
-
     /* Close the file */
     f_close(&myFile);
     break;
   }
+  if (valid) {
+    currentDisc.first_track = 1;
+    currentDisc.last_track = currentDisc.nb_track;
+    currentDisc.hasOnlyAudio = true;
+    currentDisc.format = 0x0;
+    for (int i = 0; i<currentDisc.last_track; i++)
+    {
+      if (currentDisc.tracks[i].CTRL_ADR & 0x4) {
+        currentDisc.hasOnlyAudio = false;
+      }
+      if (currentDisc.tracks[i].mode == MODE_2){
+        currentDisc.format = 0x20; //XA format
+      }
+    }
+    currentDisc.nb_block /= currentDisc.block_size;
+    int lba = currentDisc.nb_block + 150;
+    currentDisc.msf[0] = lba/(60*75);
+    lba %= 60*75;
+    currentDisc.msf[1] = lba / 75;
+    currentDisc.msf[2] = lba % 75;
+  }
+  return valid;
 }
 
-static void ExtractInfofromIso(FILINFO *fileInfo, char* path) {
+static bool ValidateInfofromCue(FILINFO *fileInfo) {
   FIL myFile;
   UINT i = strlen(fileInfo->fname);
   FRESULT fr;
-  char *newPath = malloc(strlen(path)+i+2);
-  sprintf(&newPath[0], "%s\\%s", path, fileInfo->fname);
-  if (!isA3doImage(newPath)) {
-    return;
-  }
-  if ((fileInfo->fsize % 2352)==0) {
-    allImage[nb_img].info.block_size = 2352;
-    allImage[nb_img].info.offset = 16;
-  } else if ((fileInfo->fsize % 2048)==0) {
-    allImage[nb_img].info.block_size = 2048;
-    allImage[nb_img].info.offset = 0;
-  } else {
-    //Bad format
-    printf("File is %d bytes length\n", fileInfo->fsize);
-    free(newPath);
-    return;
+  bool  valid = false;
+  char line[100];
+  unsigned int track_num = 0;
+  char *newPath = malloc(strlen(curPath)+i+2);
+  sprintf(&newPath[0], "%s\\%s", curPath, fileInfo->fname);
+  fr = f_open(&myFile, newPath, FA_READ);
+  if (fr){
+     LOG_SATA("can not open %s for reading\n",newPath);
+     return false;
   }
 
-  printf("Game %d: Read %s\n", nb_img, newPath);
+  LOG_SATA("Validate Game %s\n", newPath);
+  // Time to generate TOC
+  for (;;)
+  {
+    /* Read every line and display it */
+    while (f_gets(line, sizeof line, &myFile)) {
+      valid = true;
+      char line_end[100];
+      char line_start[100];
+      if (sscanf(line, " %s %[^\r\n]\r\n", line_start, line_end) != EOF) {
+        if (strncmp(line_start, "FILE", 4) == 0) {
+          FILINFO binInfo;
+          char filename[100];
+          char * testPath;
+          sscanf(line_end, " \"%[^\"]\"", filename);
+          testPath = malloc(strlen(curPath)+strlen(filename)+2);
+          sprintf(&testPath[0], "%s\\%s", curPath, filename);
+          fr = f_stat(testPath, &binInfo);
+          free(testPath);
+          if (fr == FR_NO_FILE) {
+            valid = false;
+            break; //Bin file does not exists
+          }
+          if (binInfo.fattrib & AM_DIR) {
+            valid = false;
+            break; //not a file
+          }
+          // currentDisc.nb_block = binInfo.fsize;
+          continue;
+        }
+        if (strncmp(line_start, "TRACK", 5) == 0) {
+          unsigned int sector_size = 0;
+          unsigned int ctl_addr = 0;
+          if (sscanf(line_end, " %u %[^\r\n]\r\n", &track_num, line_end) != EOF)
+          {
+            if (strncmp(line_end, "MODE1", 5) == 0)
+            {
+              // Figure out the track sector size
+              if (!isA3doImage(curBinPath)) {
+                valid = false;
+                break;
+              }
+              // currentDisc.block_size =  atoi(line_end + 6);
+              // currentDisc.block_size_read = 2048;
+              // currentDisc.tracks[track_num - 1].CTRL_ADR = 0x4;
+              // currentDisc.tracks[track_num - 1].id = track_num;
+              // currentDisc.tracks[track_num - 1].mode = MODE_1;
+            }
+            else if (strncmp(line_end, "MODE2", 5) == 0)
+            {
+              //PhotoCD cue file
+              // Figure out the track sector size
+              // currentDisc.block_size = currentDisc.block_size_read = atoi(line_end + 6);
+              // currentDisc.block_size_read = 2048;
+              // currentDisc.tracks[track_num - 1].CTRL_ADR = 0x4;
+              // currentDisc.tracks[track_num - 1].id = track_num;
+              // currentDisc.tracks[track_num - 1].mode = MODE_2;
+            }
+            else if (strncmp(line_end, "AUDIO", 5) == 0)
+            {
+              // // Update toc entry
+              // currentDisc.block_size = 2352; //(98 * (24))
+              // currentDisc.block_size_read = 2352; // 98*24
+              // currentDisc.tracks[track_num - 1].CTRL_ADR = 0x0;
+              // currentDisc.tracks[track_num - 1].id = track_num;
+              // currentDisc.tracks[track_num - 1].mode = CDDA;
+            }
+            else {
+              valid = false;
+              break;
+            }
+            // currentDisc.nb_track++;
+          } else {
+            valid = false;
+            break;
+          }
+          continue;
+        }
+        else if (strncmp(line_start, "INDEX", 5) == 0)
+        {
+          unsigned int indexnum, min, sec, frame;
+           if (sscanf(line_end, " %u %u:%u:%u\r\n", &indexnum, &min, &sec, &frame) == EOF) {
+             valid = false;
+             break;
+           }
 
-  if (allImage[nb_img].BinPath != NULL) free(allImage[nb_img].BinPath);
-  allImage[nb_img].BinPath = newPath;
+           // if (indexnum == 1)
+           // {
+           //    currentDisc.tracks[track_num - 1].msf[0] = min;
+           //    currentDisc.tracks[track_num - 1].msf[1] = sec + 2;
+           //    currentDisc.tracks[track_num - 1].msf[2] = frame;
+           //    currentDisc.tracks[track_num - 1].lba = min*60*75+sec*75+frame;
+           // }
+        }
+#ifdef USE_PRE_POST_GAP
+        else if (strncmp(line_start, "PREGAP", 6) == 0)
+        {
+           if (sscanf(line_end, " %d:%d:%d\r\n", &min, &sec, &frame) == EOF)
+              break;
 
-  allImage[nb_img].info.block_size_read = allImage[nb_img].info.block_size;
-
-  allImage[nb_img].info.nb_block = fileInfo->fsize / allImage[nb_img].info.block_size;
-
-  allImage[nb_img].info.first_track = 1;
-  allImage[nb_img].info.last_track = 1;
-  allImage[nb_img].info.nb_track = 1;
-  allImage[nb_img].info.hasOnlyAudio = false;
-  allImage[nb_img].info.format = 0x0; //MODE1 always
-
-  allImage[nb_img].info.tracks[0].CTRL_ADR = 0x4;
-
-  allImage[nb_img].info.tracks[0].msf[0] = 0;
-  allImage[nb_img].info.tracks[0].msf[1] = 2;
-  allImage[nb_img].info.tracks[0].msf[2] = 0;
-  allImage[nb_img].info.tracks[0].lba = 0;
-  allImage[nb_img].info.tracks[0].mode = MODE_1;
-  allImage[nb_img].info.tracks[0].id = 1;
-
-  int lba = allImage[nb_img].info.nb_block + 150;
-  allImage[nb_img].info.msf[0] = lba/(60*75);
-  lba %= 60*75;
-  allImage[nb_img].info.msf[1] = lba / 75;
-  allImage[nb_img].info.msf[2] = lba % 75;
-  nb_img++;
+           // pregap += MSF_TO_FAD(min, sec, frame);
+        }
+        else if (strncmp(line_start, "POSTGAP", 7) == 0)
+        {
+           if (sscanf(line_end, " %d:%d:%d\r\n", &min, &sec, &frame) == EOF)
+              break;
+        }
+#endif
+      }
+    }
+    /* Close the file */
+    f_close(&myFile);
+    break;
+  }
+  return valid;
 }
 
-static void processFile(FILINFO* fileInfo, char* path) {
+static bool ValidateInfofromIso(FILINFO *fileInfo) {
+  FIL myFile;
+  UINT i = strlen(fileInfo->fname);
+  FRESULT fr;
+  char *newPath = malloc(strlen(curPath)+i+2);
+  sprintf(&newPath[0], "%s\\%s", curPath, fileInfo->fname);
+  if (!isA3doImage(newPath)) {
+    return false;
+  }
+
+  return true;
+}
+
+static bool LoadfromIso(char *filePath) {
+  FIL myFile;
+  FILINFO fileInfo;
+  FRESULT fr;
+  if (!isA3doImage(filePath)) {
+    return false;
+  }
+  fr = f_stat(filePath, &fileInfo);
+  if ((fileInfo.fsize % 2352)==0) {
+    currentDisc.block_size = 2352;
+    currentDisc.offset = 16;
+  } else if ((fileInfo.fsize % 2048)==0) {
+    currentDisc.block_size = 2048;
+    currentDisc.offset = 0;
+  } else {
+    //Bad format
+    LOG_SATA("File is %d bytes length\n", fileInfo.fsize);
+    return false;
+  }
+
+  LOG_SATA("Load Game %s\n", filePath);
+
+  if (curBinPath != NULL) free(curBinPath);
+  curBinPath = filePath;
+
+  currentDisc.block_size_read = currentDisc.block_size;
+
+  currentDisc.nb_block = fileInfo.fsize / currentDisc.block_size;
+
+  currentDisc.first_track = 1;
+  currentDisc.last_track = 1;
+  currentDisc.nb_track = 1;
+  currentDisc.hasOnlyAudio = false;
+  currentDisc.format = 0x0; //MODE1 always
+
+  currentDisc.tracks[0].CTRL_ADR = 0x4;
+
+  currentDisc.tracks[0].msf[0] = 0;
+  currentDisc.tracks[0].msf[1] = 2;
+  currentDisc.tracks[0].msf[2] = 0;
+  currentDisc.tracks[0].lba = 0;
+  currentDisc.tracks[0].mode = MODE_1;
+  currentDisc.tracks[0].id = 1;
+
+  int lba = currentDisc.nb_block + 150;
+  currentDisc.msf[0] = lba/(60*75);
+  lba %= 60*75;
+  currentDisc.msf[1] = lba / 75;
+  currentDisc.msf[2] = lba % 75;
+
+  return true;
+}
+
+
+static bool extractBootImage(FILINFO *fileInfo) {
+  FIL myFile;
+  UINT i = strlen(fileInfo->fname);
+  FRESULT fr;
+  char *newPath = malloc(strlen(curPath)+i+2);
+  sprintf(&newPath[0], "%s\\%s", curPath, fileInfo->fname);
+  if (!isA3doImage(newPath)) {
+    free(newPath);
+    return false;
+  }
+  if ((fileInfo->fsize % 2352)==0) {
+    currentDisc.block_size = 2352;
+    currentDisc.offset = 16;
+  } else if ((fileInfo->fsize % 2048)==0) {
+    currentDisc.block_size = 2048;
+    currentDisc.offset = 0;
+  } else {
+    //Bad format
+    LOG_SATA("File is %d bytes length\n", fileInfo->fsize);
+    free(newPath);
+    return false;
+  }
+
+  if (curBinPath != NULL) free(curBinPath);
+  curBinPath = newPath;
+
+  currentDisc.block_size_read = currentDisc.block_size;
+
+  currentDisc.nb_block = fileInfo->fsize / currentDisc.block_size;
+
+  currentDisc.first_track = 1;
+  currentDisc.last_track = 1;
+  currentDisc.nb_track = 1;
+  currentDisc.hasOnlyAudio = false;
+  currentDisc.format = 0x0; //MODE1 always
+
+  currentDisc.tracks[0].CTRL_ADR = 0x4;
+
+  currentDisc.tracks[0].msf[0] = 0;
+  currentDisc.tracks[0].msf[1] = 2;
+  currentDisc.tracks[0].msf[2] = 0;
+  currentDisc.tracks[0].lba = 0;
+  currentDisc.tracks[0].mode = MODE_1;
+  currentDisc.tracks[0].id = 1;
+
+  int lba = currentDisc.nb_block + 150;
+  currentDisc.msf[0] = lba/(60*75);
+  lba %= 60*75;
+  currentDisc.msf[1] = lba / 75;
+  currentDisc.msf[2] = lba % 75;
+  return true;
+}
+
+static bool validateFile(FILINFO* fileInfo) {
   if (f_path_contains(fileInfo->fname,"*.cue")){
-    ExtractInfofromCue(fileInfo, path);
+     return ValidateInfofromCue(fileInfo);
   }
   if (f_path_contains(fileInfo->fname,"*.iso")){
-      ExtractInfofromIso(fileInfo, path);
+    return ValidateInfofromIso(fileInfo);
+  }
+  return false;
+}
+
+static bool loadFile(char* filepath) {
+  if (f_path_contains(filepath,"*.cue")){
+     return LoadfromCue(filepath);
+  }
+  if (f_path_contains(filepath,"*.iso")){
+    return LoadfromIso(filepath);
+  }
+  return false;
+}
+
+static dir_t* getNewDir(void) {
+  dir_t * ret=(dir_t*)malloc(sizeof(dir_t));
+  return ret;
+}
+
+#define MAX_LEVEL 3
+int level = -1;
+static bool buildDir(dir_t *dirInfo, char *path) {
+  FILINFO fileInfo;
+  bool ended = false;
+  bool hasGame = false;
+  level++;
+  LOG_SATA("Explore %s (%d)\n", path, level);
+  FRESULT res = f_findfirst(&dirInfo->dir, &fileInfo, path, "*");
+  do {
+    ended = (strlen(fileInfo.fname) == 0) || (level >= 2) || (res != FR_OK);
+    if (!ended) {
+      bool isDir = (fileInfo.fattrib & AM_DIR);
+      if (isDir && !(fileInfo.fname[0] == '.' || fileInfo.fattrib & (AM_HID | AM_SYS))) {  // skip hidden or system files
+        FRESULT res;
+        dir_t* new_dir = getNewDir();
+        UINT i = strlen(fileInfo.fname);
+        char *newPath = malloc(strlen(path)+i+2);
+        sprintf(&newPath[0], "%s\\%s", path, fileInfo.fname);
+        res = f_opendir(&(new_dir->dir), newPath);
+        hasGame |= buildDir(new_dir, newPath);
+
+        f_closedir(&(new_dir->dir));
+      } else {
+        hasGame |= f_path_contains(fileInfo.fname,"*.cue"); //Verifier le parsing et le cue
+        // hasGame |= f_path_contains(fileInfo.fname,"*.bin"); //Verifier le parsing et le cue
+        hasGame |= f_path_contains(fileInfo.fname,"*.iso"); //Verifier le parsing et le cue
+      }
+      res = f_findnext(&dirInfo->dir, &fileInfo);
+    }
+  } while(!ended);
+  level--;
+  return hasGame;
+}
+
+void loadPlaylistEntry() {
+  FRESULT res;
+  FILINFO fileInfo;
+  if (!currentDisc.mounted) {
+    LOG_SATA("Disk is not mounted\n");
+    onMountMode = BOOT_PLAYLIST;
+    return;
+  }
+  LOG_SATA("try to load %d %s\n", playlist.current_entry, playlist.path[playlist.current_entry]);
+  if (loadFile(playlist.path[playlist.current_entry])) {
+    LOG_SATA("Load entry %d\n",playlist.current_entry);
+    playlist.current_entry++;
+    if (playlist.current_entry == playlist.nb_entries) {
+      LOG_SATA("Playlist done - clearing\n");
+      clearPlaylist();
+    }
+
+    // memcpy(&currentDisc, &allImage[selected_img].info, sizeof(cd_s));
+    if (f_open(&curFile, curBinPath, FA_READ) == FR_OK) {
+      LOG_SATA("Game loaded\n");
+      last_pos = 0;
+      usb_state |= DISC_MOUNTED;
+      usb_state &= ~COMMAND_ON_GOING;
+      set3doCDReady(true);
+      set3doDriveMounted(true);
+    } else {
+      LOG_SATA("Can not open the Game!\n");
+    }
+  }
+}
+
+void loadBootIso() {
+  FRESULT res;
+  FILINFO fileInfo;
+  if (!currentDisc.mounted) {
+    onMountMode = BOOT_ISO;
+    return;
+  }
+  curDir = getNewDir();
+  curPath = (char *) malloc(3);
+  sprintf(curPath, "0:");
+  res = f_findfirst(&curDir->dir, &fileInfo, curPath, "boot.iso");
+  if ((res != FR_OK) || (strlen(fileInfo.fname) == 0)) {
+    //report error. Boot iso is not found
+  } else {
+    //load boot.iso
+    if (extractBootImage(&fileInfo)) {
+      // memcpy(&currentDisc, &allImage[selected_img].info, sizeof(cd_s));
+      if (f_open(&curFile, curBinPath, FA_READ) == FR_OK) {
+        last_pos = 0;
+        usb_state |= DISC_MOUNTED;
+        usb_state &= ~COMMAND_ON_GOING;
+        set3doCDReady(true);
+        set3doDriveMounted(true);
+      } else {
+        LOG_SATA("Can not open the Game!\n");
+      }
+    }
+  }
+}
+
+void handleBootImage(void) {
+  LOG_SATA("Handle Boot image %d (%d)\n", onMountMode, playlist.nb_entries);
+  if (playlist.nb_entries != 0) {
+    LOG_SATA("Handle playlist\n");
+    loadPlaylistEntry();
+  } else {
+    LOG_SATA("Handle boot.iso\n");
+    loadBootIso();
   }
 }
 
 bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   FRESULT result;
   requestEject = -1;
-  printf("MSC_Inquiry\n");
-  for (int i = 0; i<nb_img; i++){
-    for (int j=0; j<100; j++) {
-      if (allImage[i].BinPath != NULL) {
-        free(allImage[i].BinPath);
-        allImage[i].BinPath = NULL;
-      }
-    }
-  }
-  nb_img = 0;
+  LOG_SATA("MSC_Inquiry\n");
   result = f_mount(&DiskFATState, "" , 1);
   if (result!=FR_OK) return false;
 
-  printf("root directory contains...\n");
+  currentDisc.mounted = true;
 
-  static FILINFO fileInfo;
-  DIR dirInfo;
+  if (onMountMode == BOOT_ISO) loadBootIso();
+  if (onMountMode == BOOT_PLAYLIST) loadPlaylistEntry();
+}
 
-  FRESULT res = f_findfirst(&dirInfo, &fileInfo, "", "*");
-  processFileorDir(&fileInfo);
-  while (1) {
-    res = f_findnext(&dirInfo, &fileInfo);
-    if (res != FR_OK || fileInfo.fname[0] == 0) {
-      break;
+static int current_toc = 0;
+static int current_toc_level = 0;
+static int current_toc_offset = 0;
+
+int getTocLevel(void) {
+  return current_toc_level;
+}
+
+void setTocLevel(int index) {
+  FRESULT res;
+  FILINFO fileInfo;
+  int curDirNb = 0;
+  if (index == -1) {
+    char *lastDir = rindex(curPath, '\\');
+    if (lastDir != NULL) {
+      bool found = false;
+      char *newPath = malloc(lastDir - curPath + 1);
+      memcpy(newPath, curPath, lastDir - curPath);
+      newPath[lastDir-curPath] = 0;
+      f_closedir(&curDir->dir);
+      res = f_opendir(&curDir->dir, newPath);
+      current_toc_offset = 0;
+      free(curPath);
+      curPath = newPath;
+      current_toc = 0;
+      current_toc_level -= 1;
     }
-    processFileorDir(&fileInfo);
+    return;
   }
-  selected_img = SELECTED_IMAGE;
-  memcpy(&currentDisc, &allImage[selected_img].info, sizeof(cd_s));
-  if (f_open(&allImage[selected_img].File, allImage[selected_img].BinPath, FA_READ) == FR_OK) {
-    last_pos = 0;
-    currentDisc.mounted = true;
-    usb_state |= DISC_MOUNTED;
-    usb_state &= ~COMMAND_ON_GOING;
-    set3doCDReady(true);
-    set3doDriveMounted(true);
-  } else {
-    printf("Can not open the Game!\n");
+  if (current_toc != index) {
+    //need to change the current TOC level
+    //Get required Toc Entry
+    int i = 0;
+    f_closedir(&curDir->dir);
+    f_opendir(&curDir->dir, curPath);
+    while(i < index) {
+      if (getNextValidToc(&fileInfo)) {
+        i++;
+        current_toc_offset++;
+      }
+      if (fileInfo.fname[0] == 0) {
+        //Should raise en arror. Shall never happen
+        LOG_SATA("!!! WTF not found\n");
+        return; //End of file list
+      }
+    }
+    if (fileInfo.fattrib & AM_DIR) {
+      int i = strlen(fileInfo.fname);
+      char *newPath = malloc(strlen(curPath)+i+2);
+      sprintf(&newPath[0], "%s\\%s", curPath, fileInfo.fname);
+      free(curPath);
+      curPath = newPath;
+      f_closedir(&curDir->dir);
+      res = f_opendir(&curDir->dir, curPath);
+      current_toc_offset = 0;
+      current_toc_level++;
+    } else {
+      LOG_SATA("!!! WTF not a directory\n");
+    }
   }
+  current_toc = index;
+}
+
+static bool getNextValidToc(FILINFO *fileInfo) {
+  FRESULT res;
+  res = f_readdir(&curDir->dir, fileInfo);                   /* Read a directory item */
+  if (res != FR_OK) fileInfo->fname[0] = 0;  /* Break on error or end of dir */
+  // Ne bouger que si dir, iso ou cue, a voir
+  if (fileInfo->fname[0] == 0) return false;  /* Break on error or end of dir */
+  if ((fileInfo->fname[0] == '.') || (fileInfo->fattrib & (AM_HID | AM_SYS))) return false;
+  if (strlen(fileInfo->fname) >= TOC_NAME_LIMIT) return false;
+  if (!(fileInfo->fattrib & AM_DIR)) {
+    if (!validateFile(fileInfo)) return false;
+  }
+  return true;
+}
+
+bool seekTocTo(int index) {
+  FILINFO fileInfo;
+  int i = 0;
+  f_closedir(&curDir->dir);
+  f_opendir(&curDir->dir, curPath);
+  current_toc_offset = 0;
+  while(i < index) {
+    if (getNextValidToc(&fileInfo)) {
+      i++;
+      current_toc_offset++;
+    }
+    if (fileInfo.fname[0] == 0) return false; //End of file list
+  }
+  return true;
+}
+
+bool getReturnTocEntry(toc_entry* toc) {
+  if (toc == NULL) return false;
+  toc->flags = TOC_FLAG_DIR;
+  toc->toc_id = 0xFFFFFFFF;
+  toc->name_length = 3;
+  toc->name = malloc(toc->name_length);
+  snprintf(toc->name, toc->name_length, "..");
+  toc->name[2] = 0;
+  return true;
+}
+
+bool getNextTOCEntry(toc_entry* toc) {
+  FILINFO fileInfo;
+  if (toc == NULL) return false;
+
+  while (!getNextValidToc(&fileInfo)) {
+    if (fileInfo.fname[0] == 0) return false;
+  }
+  current_toc_offset++;
+
+  if (fileInfo.fattrib & AM_DIR) {                   /* It is a directory */
+    toc->flags = TOC_FLAG_DIR;
+  } else {                                       /* It is a file. */
+    toc->flags = TOC_FLAG_FILE;
+  }
+  toc->toc_id = current_toc_offset;
+  toc->name_length = strlen(fileInfo.fname) + 1;
+  toc->name = malloc(toc->name_length);
+  snprintf(toc->name, toc->name_length, "%s", fileInfo.fname);
+  toc->name[toc->name_length-1] = 0;
+  return true;
 }
 
 //Need a umount callback
