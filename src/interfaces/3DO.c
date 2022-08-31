@@ -54,9 +54,37 @@ typedef enum{
   EXT_ID = 0x93,
   CHANGE_TOC = 0xC0,
   GET_TOC = 0xC1,
+  GET_DESC = 0xC2,
+  CLEAR_PLAYLIST = 0xC3,
+  ADD_PLAYLIST = 0xC4,
+  LAUNCH_PLAYLIST = 0xC5,
+
   GET_TOC_LIST = 0xD1,
 
 }CD_request_t;
+
+/*
+case 0xc0: dev_ode_changetoc(); break;
+case 0xc1: dev_ode_gettoc(); break;
+case 0xc2: dev_ode_getdesc(); break;
+case 0xc3: dev_ode_clearpl(); break;
+case 0xc4: dev_ode_addpl(); break;
+case 0xc5: dev_ode_launchpl(); break;
+
+case 0xd1: dev_ode_gettoclist(); break;
+
+
+case 0xe0: dev_ode_createfile(); break;
+case 0xe1: dev_ode_openfile(); break;
+case 0xe2: dev_ode_seekfile(); break;
+case 0xe3: dev_ode_readfile(); break;
+case 0xe4: dev_ode_writefile(); break;
+case 0xe5: dev_ode_closefile(); break;
+case 0xe6: dev_ode_bufsend(); break;
+case 0xe7: dev_ode_bufrecv(); break;
+
+case 0xf0: dev_ode_startupdate(); break;
+*/
 
 typedef enum{
   DOOR_CLOSED =	0x80,
@@ -347,12 +375,34 @@ static void handleTocChange(int index) {
   setTocLevel(index);
 }
 
+char* getPathForTOC(int entry) {
+  for (int i=0; i<2048;) {
+    uint32_t flags = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
+    if (flags != TOC_FLAG_INVALID) {
+      uint32_t toc_id = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
+      uint32_t name_length = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
+      if (toc_id == entry) {
+        if (flags != TOC_FLAG_FILE) return NULL;
+        int pathLength = name_length + 1 + strlen(curPath)+1;
+        char* result = malloc(pathLength);
+        snprintf(result, pathLength, "%s\\%s", curPath, &TOC[i]);
+        return result;
+      }
+      i += name_length;
+    } else return NULL;
+  }
+  return NULL;
+}
+
 void getTocFull(int index, int nb) {
   int toclen = 0;
   int id = 0;
   bool ended = false;
   memset(TOC,0xff,sizeof(TOC));
-  if (!seekTocTo(index)) return;
+  if (!seekTocTo(index)) {
+    printf("Index %d is out of files number\n", index);
+    return;
+  }
   while(!ended) {
     toc_entry *te = malloc(sizeof(toc_entry));
     memset(te, 0x0, sizeof(toc_entry));
@@ -362,7 +412,10 @@ void getTocFull(int index, int nb) {
       if (!getNextTOCEntry(te)) break;
     }
     id++;
-    if ((nb != -1) && (id >= nb)) ended = true;
+    if ((nb != -1) && (id >= (nb+index))) {
+      printf("Id %d is out of files number %d\n", id, nb+index);
+      ended = true;
+    }
     TOC[toclen++]=te->flags>>24;
     TOC[toclen++]=te->flags>>16;
     TOC[toclen++]=te->flags>>8;
@@ -380,7 +433,10 @@ void getTocFull(int index, int nb) {
     }
     if (te->name != NULL) free(te->name);
     free(te);
-    if (toclen > (sizeof(TOC)-(128+13))) ended = true;
+    if (toclen > (sizeof(TOC)-(128+13))) {
+      printf("Buffer is full\n");
+      ended = true;
+    }
   }
 }
 
@@ -391,6 +447,43 @@ void getToc(int index, int offset, uint8_t* buffer) {
   }
   memcpy(buffer, &TOC[offset], 16);
 
+}
+#define PLAYLIST_MAX 16
+typedef struct playlist_entry_s{
+  char *path[PLAYLIST_MAX];
+  int nb_entries;
+} playlist_entry;
+
+playlist_entry playlist = {0};
+
+void clearPlaylist(void) {
+  for (int i=0; i<playlist.nb_entries; i++) {
+    if (playlist.path[i] != NULL) {
+      free(playlist.path[i]);
+      playlist.path[i] = NULL;
+    }
+  }
+  playlist.nb_entries = 0;
+}
+
+
+void addToPlaylist(int entry, bool *valid, bool *added) {
+  char *entry_path = NULL;
+  entry_path = getPathForTOC(entry);
+  if (entry_path == NULL) {
+    *valid = false;
+    *added = false;
+    return;
+  }
+  *valid = true;
+  if (playlist.nb_entries >= PLAYLIST_MAX) {
+    *valid = false;
+    *added = false;
+    return;
+  }
+  *added = true;
+  playlist.path[playlist.nb_entries++] = entry_path;
+  printf("Add to playlist %s\n", entry_path);
 }
 
 absolute_time_t lastPacket;
@@ -834,6 +927,50 @@ what's your reply to 0x83?
       }
       buffer[index++] = status;
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case GET_DESC:
+      for (int i=0; i<6; i++) {
+        data_in[i] = GET_BUS(get3doData());
+      }
+      LOG_SATA("GET_DESC\n");
+      buffer[index++] = GET_DESC;
+      buffer[index++] = status;
+      break;
+    case CLEAR_PLAYLIST:
+      for (int i=0; i<6; i++) {
+        data_in[i] = GET_BUS(get3doData());
+      }
+      LOG_SATA("CLEAR_PLAYLIST\n");
+      buffer[index++] = CLEAR_PLAYLIST;
+      buffer[index++] = status;
+      clearPlaylist();
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case ADD_PLAYLIST:
+      for (int i=0; i<6; i++) {
+        data_in[i] = GET_BUS(get3doData());
+      }
+      buffer[index++] = ADD_PLAYLIST;
+      {
+        uint32_t entry = 0;
+        bool valid = false;
+        bool added = false;
+        entry = ((data_in[0]&0xFF)<<24)|((data_in[1]&0xFF)<<16)|((data_in[2]&0xFF)<<8)|((data_in[3]&0xFF)<<0);
+        LOG_SATA("ADD_PLAYLIST %d\n", entry);
+        addToPlaylist(entry, &valid, &added);
+        buffer[index++] = valid;
+        buffer[index++] = added;
+      }
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case LAUNCH_PLAYLIST:
+      for (int i=0; i<6; i++) {
+        data_in[i] = GET_BUS(get3doData());
+      }
+      LOG_SATA("LAUNCH_PLAYLIST\n");
+      buffer[index++] = LAUNCH_PLAYLIST;
+      buffer[index++] = status;
       break;
     case GET_TOC_LIST:
       for (int i=0; i<6; i++) {

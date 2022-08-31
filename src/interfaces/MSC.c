@@ -568,27 +568,17 @@ void setTocLevel(int index) {
     printf("Try to go back from %s\n", curPath);
     char *lastDir = rindex(curPath, '\\');
     if (lastDir != NULL) {
-      int new_current_toc = 0;
       bool found = false;
       char *newPath = malloc(lastDir - curPath + 1);
       memcpy(newPath, curPath, lastDir - curPath);
       newPath[lastDir-curPath] = 0;
-      printf("new Path %s old entry %s\n", curPath, lastDir+1);
+      printf("new Path %s old entry %s\n", newPath, lastDir+1);
       f_closedir(&curDir->dir);
       res = f_opendir(&curDir->dir, newPath);
       current_toc_offset = 0;
-      while(!found) {
-        if (getNextValidToc(&fileInfo)) {
-          new_current_toc++;
-          printf("File Info %s\n", fileInfo.fname);
-          if (strncmp(fileInfo.fname, lastDir+1, 128) == 0){
-            break;
-          }
-        }
-      }
       free(curPath);
       curPath = newPath;
-      current_toc = new_current_toc;
+      current_toc = 0;
       current_toc_level -= 1;
     }
     printf("Current Toc is %d\n", current_toc);
@@ -597,22 +587,32 @@ void setTocLevel(int index) {
   if (current_toc != index) {
     //need to change the current TOC level
     //Get required Toc Entry
-    res = f_findfirst(&curDir->dir, &fileInfo, curPath, "*");
-    for (int i = 0; i < index-1; i++)
-      res = f_findnext(&curDir->dir, &fileInfo);
-    if ((strlen(fileInfo.fname) == 0) || (res != FR_OK)) return;
-    else {
-      if (fileInfo.fattrib & AM_DIR) {
-        int i = strlen(fileInfo.fname);
-        char *newPath = malloc(strlen(curPath)+i+2);
-        sprintf(&newPath[0], "%s\\%s", curPath, fileInfo.fname);
-        free(curPath);
-        curPath = newPath;
-        f_closedir(&curDir->dir);
-        res = f_opendir(&curDir->dir, curPath);
-        current_toc_offset = 0;
-        current_toc_level++;
+    int i = 0;
+    f_closedir(&curDir->dir);
+    f_opendir(&curDir->dir, curPath);
+    while(i < index) {
+      if (getNextValidToc(&fileInfo)) {
+        i++;
+        current_toc_offset++;
       }
+      if (fileInfo.fname[0] == 0) {
+        //Should raise en arror. Shall never happen
+        printf("!!! WTF not found\n");
+        return; //End of file list
+      }
+    }
+    if (fileInfo.fattrib & AM_DIR) {
+      int i = strlen(fileInfo.fname);
+      char *newPath = malloc(strlen(curPath)+i+2);
+      sprintf(&newPath[0], "%s\\%s", curPath, fileInfo.fname);
+      free(curPath);
+      curPath = newPath;
+      f_closedir(&curDir->dir);
+      res = f_opendir(&curDir->dir, curPath);
+      current_toc_offset = 0;
+      current_toc_level++;
+    } else {
+      printf("!!! WTF not a directory\n");
     }
   }
   current_toc = index;
@@ -625,6 +625,7 @@ static bool getNextValidToc(FILINFO *fileInfo) {
   // Ne bouger que si dir, iso ou cue, a voir
   if (fileInfo->fname[0] == 0) return false;  /* Break on error or end of dir */
   if ((fileInfo->fname[0] == '.') || (fileInfo->fattrib & (AM_HID | AM_SYS))) return false;
+  if (strlen(fileInfo->fname) > TOC_NAME_LIMIT) return false;
   if (!(fileInfo->fattrib & AM_DIR)) {
     if (!processFile(fileInfo)) return false;
   }
@@ -641,7 +642,8 @@ bool seekTocTo(int index) {
     if (getNextValidToc(&fileInfo)) {
       i++;
       current_toc_offset++;
-    } else return false;
+    }
+    if (fileInfo.fname[0] == 0) return false; //End of file list
   }
   return true;
 }
@@ -673,7 +675,6 @@ bool getNextTOCEntry(toc_entry* toc) {
   }
   toc->toc_id = current_toc_offset;
   toc->name_length = strlen(fileInfo.fname) + 1;
-  if (toc->name_length > (TOC_NAME_LIMIT+1))  toc->name_length = TOC_NAME_LIMIT+1;
   toc->name = malloc(toc->name_length);
   snprintf(toc->name, TOC_NAME_LIMIT, "%s", fileInfo.fname);
   toc->name[TOC_NAME_LIMIT] = 0;
