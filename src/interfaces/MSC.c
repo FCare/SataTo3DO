@@ -650,9 +650,10 @@ bool getReturnTocEntry(toc_entry* toc) {
   if (toc == NULL) return false;
   toc->flags = TOC_FLAG_DIR;
   toc->toc_id = 0xFFFFFFFF;
-  toc->name_length = 2;
-  toc->name = malloc(toc->name_length + 1);
+  toc->name_length = 3;
+  toc->name = malloc(toc->name_length);
   snprintf(toc->name, TOC_NAME_LIMIT, "..");
+  toc->name[2] = 0;
   return true;
 }
 
@@ -671,11 +672,11 @@ bool getNextTOCEntry(toc_entry* toc) {
     toc->flags = TOC_FLAG_FILE;
   }
   toc->toc_id = current_toc_offset;
-  toc->name_length = strlen(fileInfo.fname);
-  if (toc->name_length > TOC_NAME_LIMIT)  toc->name_length = TOC_NAME_LIMIT;
-  toc->name = malloc(toc->name_length + 1);
+  toc->name_length = strlen(fileInfo.fname) + 1;
+  if (toc->name_length > (TOC_NAME_LIMIT+1))  toc->name_length = TOC_NAME_LIMIT+1;
+  toc->name = malloc(toc->name_length);
   snprintf(toc->name, TOC_NAME_LIMIT, "%s", fileInfo.fname);
-
+  toc->name[TOC_NAME_LIMIT] = 0;
   return true;
 }
 

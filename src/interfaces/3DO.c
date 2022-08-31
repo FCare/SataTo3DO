@@ -378,7 +378,6 @@ void getTocFull(int index, int nb) {
     for(uint32_t t=0;t<te->name_length;t++) {
       TOC[toclen++]=te->name[t];
     }
-    TOC[toclen++]=0;
     if (te->name != NULL) free(te->name);
     free(te);
     if (toclen > (sizeof(TOC)-(128+13))) ended = true;
@@ -857,7 +856,7 @@ what's your reply to 0x83?
           uint32_t toc_id = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
           uint32_t name_length = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
           printf(".flags :0x%x, .toc_id: %d, .name_length: %d, .name: %s\n", flags, toc_id, name_length, &TOC[i]);
-          i += name_length+1;
+          i += name_length;
         } else break;
       }
       printf("\n");
