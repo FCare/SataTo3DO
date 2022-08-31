@@ -1,6 +1,8 @@
 #ifndef _3DO_INTERFACE_H_
 #define _3DO_INTERFACE_H_
 
+#include <stdbool.h>
+
 #define UART_LED 28
 
 #define DATA_0 2

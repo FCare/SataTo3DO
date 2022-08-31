@@ -10,6 +10,7 @@
 #include "pico/multicore.h"
 
 #include "3DO.h"
+#include "MSC.h"
 #include "CDFormat.h"
 
 #define DATA_BUS_MASK (0xFF<<CDD0)
@@ -49,6 +50,12 @@ typedef enum{
   READ_DISC_INFO = 0x8B,
   READ_TOC = 0x8C,
   READ_SESSION = 0x8D,
+//Fixel added commands
+  EXT_ID = 0x93,
+  CHANGE_TOC = 0xC0,
+  GET_TOC = 0xC1,
+  GET_TOC_LIST = 0xD1,
+
 }CD_request_t;
 
 typedef enum{
@@ -331,6 +338,62 @@ bool sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
   pio_sm_set_enabled(pio0, sm[CHAN_WRITE_DATA], false);
   return true;
 }
+
+static uint8_t TOC[2048] = {0};
+
+static void handleTocChange(int index) {
+  toc_entry toc;
+  //switch to the right TOC level
+  setTocLevel(index);
+}
+
+void getTocFull(int index, int nb) {
+  int toclen = 0;
+  int id = 0;
+  bool ended = false;
+  memset(TOC,0xff,sizeof(TOC));
+  if (!seekTocTo(index)) return;
+  while(!ended) {
+    toc_entry *te = malloc(sizeof(toc_entry));
+    memset(te, 0x0, sizeof(toc_entry));
+    if ((index == 0) && (id == 0) && (getTocLevel() != 0)) {
+      if (!getReturnTocEntry(te)) break;
+    } else {
+      if (!getNextTOCEntry(te)) break;
+    }
+    id++;
+    if ((nb != -1) && (id >= nb)) ended = true;
+    TOC[toclen++]=te->flags>>24;
+    TOC[toclen++]=te->flags>>16;
+    TOC[toclen++]=te->flags>>8;
+    TOC[toclen++]=te->flags&0xff;
+    TOC[toclen++]=te->toc_id>>24;
+    TOC[toclen++]=te->toc_id>>16;
+    TOC[toclen++]=te->toc_id>>8;
+    TOC[toclen++]=te->toc_id&0xff;
+    TOC[toclen++]=te->name_length>>24;
+    TOC[toclen++]=te->name_length>>16;
+    TOC[toclen++]=te->name_length>>8;
+    TOC[toclen++]=te->name_length&0xff;
+    for(uint32_t t=0;t<te->name_length;t++) {
+      TOC[toclen++]=te->name[t];
+    }
+    TOC[toclen++]=0;
+    if (te->name != NULL) free(te->name);
+    free(te);
+    if (toclen > (sizeof(TOC)-(128+13))) ended = true;
+  }
+}
+
+void getToc(int index, int offset, uint8_t* buffer) {
+  if (offset == 0) {
+    //init the TOC buffer
+    getTocFull(index, -1);
+  }
+  memcpy(buffer, &TOC[offset], 16);
+
+}
+
 absolute_time_t lastPacket;
 void sendData(int startlba, int nb_block, bool trace) {
 
@@ -381,13 +444,19 @@ void sendData(int startlba, int nb_block, bool trace) {
   }
 }
 
+void sendRawData(int command, uint8_t *buffer, int length) {
+  uint8_t status_buffer[2] = {command, status};
+  if (length == 0) return;
+  if (!sendAnswerStatusMixed(buffer, length, status_buffer, 2, true, false)) return;
+}
+
 static bool ledState = false;
 
 void handleCommand(uint32_t data) {
   CD_request_t request = (CD_request_t) GET_BUS(data);
   bool isCmd = (data>>CDCMD)&0x1 == 0x0;
   uint32_t data_in[6];
-  uint8_t buffer[12];
+  uint8_t buffer[18];
   uint8_t subBuffer[16];
   uint index = 0;
 
@@ -714,6 +783,86 @@ what's your reply to 0x83?
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       }
         break;
+//FIXEL Extended commands implementation for ODE menu
+    case EXT_ID:
+      for (int i=0; i<6; i++) {
+        data_in[i] = GET_BUS(get3doData());
+      }
+      LOG_SATA("EXT_ID\n");
+      buffer[index++] = EXT_ID;
+      buffer[index++] = 0x1; //Where is located the boot.iso microsd=1, usbmsc=2, flash=4, sata=8
+      buffer[index++] = 'L';
+      buffer[index++] = 'O';
+      buffer[index++] = 'C';
+      buffer[index++] = 'O';
+      buffer[index++] = 'D';
+      buffer[index++] = 'E';
+      buffer[index++] = 1; //rev major
+      buffer[index++] = 1; //rev minor
+      buffer[index++] = 0; //rev patch
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case CHANGE_TOC:
+      for (int i=0; i<6; i++) {
+        data_in[i] = GET_BUS(get3doData());
+      }
+      buffer[index++] = CHANGE_TOC;
+      {
+        uint32_t entry = 0;
+        entry = ((data_in[0]&0xFF)<<24)|((data_in[1]&0xFF)<<16)|((data_in[2]&0xFF)<<8)|((data_in[3]&0xFF)<<0);
+        LOG_SATA("CHANGE_TOC %d\n", entry);
+        handleTocChange(entry);
+      }
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case GET_TOC:
+      for (int i=0; i<6; i++) {
+        data_in[i] = GET_BUS(get3doData());
+      }
+      buffer[index++] = GET_TOC;
+      {
+        uint32_t entry = 0;
+        uint16_t offset = 0;
+        entry = ((data_in[0]&0xFF)<<24)|((data_in[1]&0xFF)<<16)|((data_in[2]&0xFF)<<8)|((data_in[3]&0xFF)<<0);
+        offset = ((data_in[4]&0xFF)<<8)|((data_in[5]&0xFF)<<0);
+        LOG_SATA("GET_TOC %d %d\n", entry, offset);
+        getToc(entry, offset, &buffer[index]);
+        for (int i=0; i<16; i++) printf("%x ", buffer[index+i]);
+        printf("\n");
+        index += 16;
+      }
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case GET_TOC_LIST:
+      for (int i=0; i<6; i++) {
+        data_in[i] = GET_BUS(get3doData());
+      }
+      buffer[index++] = GET_TOC_LIST;
+      {
+        uint32_t entry = 0;
+        uint16_t offset = 0;
+        entry = ((data_in[0]&0xFF)<<24)|((data_in[1]&0xFF)<<16)|((data_in[2]&0xFF)<<8)|((data_in[3]&0xFF)<<0);
+        offset = ((data_in[4]&0xFF)<<8)|((data_in[5]&0xFF)<<0);
+        LOG_SATA("GET_TOC_LIST %d %d\n", entry, offset);
+        getTocFull(entry, offset);
+      }
+      sendRawData(GET_TOC_LIST, &TOC[0], 2048);
+      printf("TOC Buffer:\n");
+      for (int i=0; i<2048;) {
+        uint32_t flags = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
+        if (flags != TOC_FLAG_INVALID) {
+          uint32_t toc_id = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
+          uint32_t name_length = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
+          printf(".flags :0x%x, .toc_id: %d, .name_length: %d, .name: %s\n", flags, toc_id, name_length, &TOC[i]);
+          i += name_length+1;
+        } else break;
+      }
+      printf("\n");
+
+      break;
     default: LOG_SATA("unknown Cmd %x\n", request);
   }
 }
