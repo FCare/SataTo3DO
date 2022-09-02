@@ -1,0 +1,211 @@
+case 0x93: dev_cd_extid(); break;
+
+
+   case 0xc0: dev_ode_changetoc(); break;
+   case 0xc1: dev_ode_gettoc(); break;
+   case 0xc2: dev_ode_getdesc(); break;
+   case 0xc3: dev_ode_clearpl(); break;
+   case 0xc4: dev_ode_addpl(); break;
+   case 0xc5: dev_ode_launchpl(); break;
+
+   case 0xd1: dev_ode_gettoclist(); break;
+
+
+   case 0xe0: dev_ode_createfile(); break;
+   case 0xe1: dev_ode_openfile(); break;
+   case 0xe2: dev_ode_seekfile(); break;
+   case 0xe3: dev_ode_readfile(); break;
+   case 0xe4: dev_ode_writefile(); break;
+   case 0xe5: dev_ode_closefile(); break;
+   case 0xe6: dev_ode_bufsend(); break;
+   case 0xe7: dev_ode_bufrecv(); break;
+
+   case 0xf0: dev_ode_startupdate(); break;
+
+
+93: extended id :
+return status :
+0x93 02  '3' 'D' 'S' 'A' 'T' 'A' 0x1 0x1 0x0 mei_status
+
+0x93 status reply struct
+{
+  uint8_t boot_device; //
+  char name[6]; // device friendly name
+  uint8_t rev_major;
+  uint8_t rev_minor;
+  uint8_t rev_patch;
+}
+boot device : enum{
+  microsd=1,
+  usbmsc=2,
+  flash=4,
+  sata=8
+}
+
+0xc0 II II II II -- change toc... (change current directory to ... tocid IIIIIIII ). reply - 0xc0 mei_status
+ -- all numbers are big endian
+
+ 0xc0 II II II II SS SS
+ get 16 bytes toc entry  IIIIIIII from the TOCBuffer and buffer offset SSSS
+ when SSSS==0, the toc is read from filesystem into the toc buffer. if SSSS>0 -- the buffer is not changed
+
+ status :
+ 0xC0 HH HH HH HH ..... HH mei_status
+
+ where HH HH HH ... HH are 16 bytes from the TOCBuffer[SSSS]
+
+ f(offs==0)
+     {
+         memset(tocbuffer,0xff,sizeof(tocbuffer));
+             res=toc_read(id,&te);
+             if(res>0)
+             {
+                 tocbuffer[toclen++]=te.flags>>24;
+                 tocbuffer[toclen++]=te.flags>>16;
+                 tocbuffer[toclen++]=te.flags>>8;
+                 tocbuffer[toclen++]=te.flags&0xff;
+                 tocbuffer[toclen++]=te.toc_id>>24;
+                 tocbuffer[toclen++]=te.toc_id>>16;
+                 tocbuffer[toclen++]=te.toc_id>>8;
+                 tocbuffer[toclen++]=te.toc_id&0xff;
+                 te.name_length++; //inlude 0
+                 tocbuffer[toclen++]=te.name_length>>24;
+                 tocbuffer[toclen++]=te.name_length>>16;
+                 tocbuffer[toclen++]=te.name_length>>8;
+                 tocbuffer[toclen++]=te.name_length&0xff;
+                 for(uint32_t t=0;t<te.name_length;t++)
+                     tocbuffer[toclen++]=te.name[t];
+             }
+     }
+     for(int i=0;i<16;i++)
+     {
+         dev_cd.stat_buffer[dev_cd.status_length++]=tocbuffer[offs+i];
+     }
+
+     memset 0xff -- ensures that my boot.iso will not read PAST the last entry
+     [15:58]
+     as flags FFFFFFFF -- invalid entry
+
+
+     0xd1 II II II II TT TT  --- get toc list
+     get list of TTTT toc entries, stating from id IIIIIIII
+     fills TOCBuffer with the toc list... and returns all 2048 bytes via data fifo
+     status is  : 0xd1 mei_status
+
+     basically TTTT should be <=14
+     memset(tocbuffer,0xff,sizeof(tocbuffer));
+         do{
+             blink_led();
+                 res=toc_read(id,&te);
+                 if(res>0)
+                 {
+                     //estimate actual len :
+                     if((te.name_length+13)>=2048)
+                         break; //can't fit anymore
+
+                     tocbuffer[toclen++]=te.flags>>24;
+                     tocbuffer[toclen++]=te.flags>>16;
+                     tocbuffer[toclen++]=te.flags>>8;
+                     tocbuffer[toclen++]=te.flags&0xff;
+                     tocbuffer[toclen++]=te.toc_id>>24;
+                     tocbuffer[toclen++]=te.toc_id>>16;
+                     tocbuffer[toclen++]=te.toc_id>>8;
+                     tocbuffer[toclen++]=te.toc_id&0xff;
+                     if(te.flags!=TOC_FLAG_INVALID)
+                     {
+
+                         te.name[127]=0; //hard limit -- (128+13)*14=1974, still fits in buffer
+                         te.name_length=strlen(te.name)+1; //inlude 0
+
+                         tocbuffer[toclen++]=te.name_length>>24;
+                         tocbuffer[toclen++]=te.name_length>>16;
+                         tocbuffer[toclen++]=te.name_length>>8;
+                         tocbuffer[toclen++]=te.name_length&0xff;
+                         for(uint32_t t=0;t<te.name_length;t++)
+                             tocbuffer[toclen++]=te.name[t];
+                     }
+                     else
+                         break;
+                 }
+                 else
+                     break;
+                 id++;
+                 count--;
+                 if(count<=0)
+                     break;
+         }while(toclen<2048);
+     basically allows faster navigation
+     for devices with faster media. microSD is one of them. but heavy load on 3DO and device
+     may fit more than 14 entries if names are smaller
+
+     next :
+     [16:16]
+      case 0xc3: dev_ode_clearpl(); break;
+         case 0xc4: dev_ode_addpl(); break;
+         case 0xc5: dev_ode_launchpl(); break;
+     [16:16]
+     those are simple :
+     [16:17]
+     0xc3 --- clear play list (queue), return 0xc3 mei_status....
+     [16:19]
+     0xc4 II II II II  --- add TOC ID IIIIIIII to the playlist --- returns 0xc4 VV QQ mei_status
+
+     VV = is TOC_ID valid? true/false
+     QQ = was the disk image valid and added to the playlist? true/false
+     [16:20]
+     0xc5 -- start playlist ,returns 0xc5 mei_status
+     mounts first image on the playlist, and causes media interrupt
+     [16:21]
+     those are for the multidisc games...
+     [16:21]
+     next are the file operations...
+     [16:22]
+     if you don't support it , just report error on those
+     [16:22]
+     the theory:
+     [16:22]
+     you have file buffer and can read/write files using this buffer.
+     [16:23]
+     buffer is 2048 bytes (you can reuse TOC buffer, as all file operations are Mutexed with TOC operations. They don't mix in the menu)
+     [16:24]
+     2 commands are to transfer data to and from the file buffer:
+     [16:26]
+     0xe6 oo oo ww ww ww ww -- write the WW WW WW WW (4 bytes) to the file buffer at offset 4*OOOO
+     basically :
+         fops_buffer[(off<<2)+0]=dev_cd.cmd_buffer[3];
+         fops_buffer[(off<<2)+1]=dev_cd.cmd_buffer[4];
+         fops_buffer[(off<<2)+2]=dev_cd.cmd_buffer[5];
+         fops_buffer[(off<<2)+3]=dev_cd.cmd_buffer[6];
+     status: e6 mei_status
+     [16:26]
+     e7 --- read the file buffer . returns the entire 2048 file buffer via data fifo.
+     status e7 mei_status
+     [16:27]
+     this is basic I/O
+     [16:27]
+     next are the actual file operations :
+     [16:28]
+     0xe0 LL LL --- create file with name in buffer, name length is LLLL, opens for write ops,
+     status : e0 GG mei_status,
+     GG - success?true/false
+
+     e1 00 ID ID ID ID WR -- open file by tocid in current dir, wr? 1 = write/ 0=read
+e1 01 LL LL 00 00 WR -- open file by name in buffer with length LL, wr? 1 = write / 0 = read
+
+status ? e1 GG mei_status,
+GG - success ?true/false
+[16:31]
+just return false
+
+E2 SS SS SS SS -- f_lseek(file,SSSSSSSS). status : e2 mei_status
+E3 LL LL : read LLLL bytes to the file buffer,
+status e3 KK KK mei_status :
+KKKK = actual bytes read. or 0000 if not read (eof), or error
+E4 LL LL : write LLLL bytes to the file from the file buffer
+status e4 KK KK mei_status :
+KKKK = actual bytes written, or 0000 if not written or error
+E5 -- close file.... f_sync, f_close . status e5 mei_status
+f0 -- update ODE firmware.  status f0 mei_status. starts the update cycle after the status was read out by the console.... otherwise the console will lock up
+that's all for the API
+description -- 0xc2 i will explain later , right now menu doesn't read it and i am not 100% set on the format yet
+XPort has 0xe8 -- which allows to send up to 2048 bytes to the file buffer using data write fifo.. much faster than 4 bytes using command interface...
