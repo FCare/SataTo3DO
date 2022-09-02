@@ -24,7 +24,7 @@
 
 extern bool readBlock(uint32_t start, uint16_t nb_block, uint16_t block_size, uint8_t *buffer);
 extern bool readSubQChannel(uint8_t *buffer);
-extern bool driveEject(bool eject);
+extern bool USBDriveEject(bool eject, bool *interrupt);
 extern bool block_is_ready();
 extern bool isAudioBlock(uint32_t start);
 
@@ -140,6 +140,7 @@ int errorOnDisk = 0;
 
 
 uint sm_read = -1;
+uint instr_jmp_read;
 
 uint instr_out;
 uint instr_pull;
@@ -157,26 +158,15 @@ uint8_t errorCode = POWER_OR_RESET_OCCURED;
 uint8_t status = DOOR_CLOSED | CHECK_ERROR;
 
 void close_tray(bool close) {
-  if (!driveEject(!close)) {
-    LOG_SATA("Can not eject/inject\n");
+  printf("Ask to eject %d\n", close);
+  bool interrupt = false;
+  if (!USBDriveEject(!close, &interrupt)) {
+    printf("Can not eject/inject\n");
     return;
   }
-  status &= ~DOOR_CLOSED;
-  if (close) {
-    gpio_set_dir(CDRST, true);
-    gpio_put(CDRST, 0);
-    gpio_put(CDMDCHG, 1); //Under reset
-    sleep_ms(200);
-    gpio_put(CDRST, 1);
-    gpio_set_dir(CDRST, false);
-    sleep_ms(150);
-    gpio_put(CDMDCHG, 0); //Under reset
-    sleep_ms(10);
-    gpio_put(CDMDCHG, 1); //Under reset
-    sleep_ms(6);
-    gpio_put(CDMDCHG, 0); //Under reset
-    status |= DOOR_CLOSED | CHECK_ERROR;
-    errorCode |= POWER_OR_RESET_OCCURED;
+  // status &= ~DOOR_CLOSED;
+  if (interrupt) {
+    mediaInterrupt();
   } else {
     currentDisc.mounted = false;
     status |= CHECK_ERROR;
@@ -188,12 +178,10 @@ void wait_out_of_reset() {
   while( !gpio_get(CDRST)) {
     gpio_put(CDMDCHG, 1); //Under reset
   }
-  sleep_ms(150);
+  sleep_ms(500);
   gpio_put(CDMDCHG, 0); //Under reset
-  sleep_ms(10);
+  sleep_ms(100);
   gpio_put(CDMDCHG, 1); //Under reset
-  sleep_ms(6);
-  gpio_put(CDMDCHG, 0); //Under reset
 }
 
 void set3doCDReady(bool on) {
@@ -281,6 +269,13 @@ void restartPio(uint8_t channel) {
   pio_sm_restart(pio0, sm[channel]);
   pio_sm_exec(pio0, sm[channel], instr_jmp[channel]);
   pio_sm_set_enabled(pio0, sm[channel], true);
+}
+
+static void restartReadPio() {
+  pio_sm_drain_tx_fifo(pio0, sm_read);
+  pio_sm_restart(pio0, sm_read);
+  pio_sm_exec(pio0, sm_read, instr_jmp_read);
+  pio_sm_set_enabled(pio0, sm_read, true);
 }
 
 void startDMA(uint8_t access, uint8_t *buffer, uint32_t nbWord) {
@@ -386,11 +381,16 @@ char* getPathForTOC(int entry) {
         int pathLength = name_length + 1 + strlen(curPath)+1;
         char* result = malloc(pathLength);
         snprintf(result, pathLength, "%s\\%s", curPath, &TOC[i]);
+        printf("return %s\n", result);
         return result;
       }
       i += name_length;
-    } else return NULL;
+    } else {
+      printf("1: return NULL\n");
+      return NULL;
+    }
   }
+  printf("2: return NULL\n");
   return NULL;
 }
 
@@ -407,9 +407,15 @@ void getTocFull(int index, int nb) {
     toc_entry *te = malloc(sizeof(toc_entry));
     memset(te, 0x0, sizeof(toc_entry));
     if ((index == 0) && (id == 0) && (getTocLevel() != 0)) {
+      printf("1 %d %d %d\n", index, id, getTocLevel());
+      printPlaylist();
       if (!getReturnTocEntry(te)) break;
+      printPlaylist();
     } else {
+      printf("2 %d %d %d\n", index, id, getTocLevel());
+      printPlaylist();
       if (!getNextTOCEntry(te)) break;
+      printPlaylist();
     }
     id++;
     if ((nb != -1) && (id >= (nb+index))) {
@@ -447,43 +453,6 @@ void getToc(int index, int offset, uint8_t* buffer) {
   }
   memcpy(buffer, &TOC[offset], 16);
 
-}
-#define PLAYLIST_MAX 16
-typedef struct playlist_entry_s{
-  char *path[PLAYLIST_MAX];
-  int nb_entries;
-} playlist_entry;
-
-playlist_entry playlist = {0};
-
-void clearPlaylist(void) {
-  for (int i=0; i<playlist.nb_entries; i++) {
-    if (playlist.path[i] != NULL) {
-      free(playlist.path[i]);
-      playlist.path[i] = NULL;
-    }
-  }
-  playlist.nb_entries = 0;
-}
-
-
-void addToPlaylist(int entry, bool *valid, bool *added) {
-  char *entry_path = NULL;
-  entry_path = getPathForTOC(entry);
-  if (entry_path == NULL) {
-    *valid = false;
-    *added = false;
-    return;
-  }
-  *valid = true;
-  if (playlist.nb_entries >= PLAYLIST_MAX) {
-    *valid = false;
-    *added = false;
-    return;
-  }
-  *added = true;
-  playlist.path[playlist.nb_entries++] = entry_path;
-  printf("Add to playlist %s\n", entry_path);
 }
 
 absolute_time_t lastPacket;
@@ -542,6 +511,35 @@ void sendRawData(int command, uint8_t *buffer, int length) {
   if (!sendAnswerStatusMixed(buffer, length, status_buffer, 2, true, false)) return;
 }
 
+static bool hasMediaInterrupt = false;
+void mediaInterrupt(void) {
+  hasMediaInterrupt = true;
+  // status |= DOOR_CLOSED;
+}
+void handleMediaInterrupt() {
+  if (!hasMediaInterrupt) return;
+  hasMediaInterrupt = false;
+  // gpio_set_dir(CDRST, true);
+  // gpio_put(CDRST, 0);
+  // pio_sm_set_enabled(pio0, sm_read, false);
+  // gpio_put(CDMDCHG, 1); //Under reset
+  // sleep_ms(200);
+  // gpio_put(CDRST, 1);
+  // gpio_set_dir(CDRST, false);
+  // sleep_ms(150);
+  // gpio_put(CDMDCHG, 0); //Under reset
+  // sleep_ms(10);
+  gpio_put(CDMDCHG, 0); //Under reset
+  sleep_ms(10);
+  while (!pio_sm_is_rx_fifo_empty(pio0, sm_read)) {
+    pio_sm_get(pio0, sm_read);
+  }
+  handleBootImage();
+  gpio_put(CDMDCHG, 1); //Under reset
+  // pio_sm_set_enabled(pio0, sm_read, false);
+  // errorCode |= POWER_OR_RESET_OCCURED;
+}
+
 static bool ledState = false;
 
 void handleCommand(uint32_t data) {
@@ -555,6 +553,7 @@ void handleCommand(uint32_t data) {
   gpio_put(LED, ledState);
   ledState = !ledState;
 
+printf("%x\n", request);
   switch(request) {
     case READ_ID:
     for (int i=0; i<6; i++) {
@@ -969,8 +968,12 @@ what's your reply to 0x83?
         data_in[i] = GET_BUS(get3doData());
       }
       LOG_SATA("LAUNCH_PLAYLIST\n");
+      //Initiate an media change error
+      status |= CHECK_ERROR;
       buffer[index++] = LAUNCH_PLAYLIST;
       buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      mediaInterrupt();
       break;
     case GET_TOC_LIST:
       for (int i=0; i<6; i++) {
@@ -1046,6 +1049,7 @@ void core1_entry() {
   }
 
   LOG_SATA("Ready\n");
+  handleBootImage();
   while (1){
 
     if (use_cdrom) {
@@ -1053,11 +1057,13 @@ void core1_entry() {
       gpio_put(CDEN_SNIFF, gpio_get(CDEN));
     } else {
       if (!gpio_get(CDRST)) {
+        printf("Got a reset!\n");
         reset_occured = true;
-
         wait_out_of_reset();
+        restartReadPio();
         errorCode |= POWER_OR_RESET_OCCURED;
         status |= CHECK_ERROR;
+
       }
       if (gpio_get(CDEN)) {
         LOG_SATA("CD is not enabled\n");
@@ -1067,18 +1073,18 @@ void core1_entry() {
 
       bool ejectCurrent = gpio_get(EJECT);
       if (ejectCurrent != ejectState) {
-          if (!debounceEject) s = get_absolute_time();
-          debounceEject = true;
-          if (absolute_time_diff_us(s, get_absolute_time()) > 2000) {
-            ejectState = ejectCurrent;
-            //Eject button pressed, toggle tray position
-            if (!ejectCurrent) {
-              close_tray((status & DOOR_CLOSED) == 0);
-            }
-            debounceEject = false;
+        if (!debounceEject) s = get_absolute_time();
+        debounceEject = true;
+        if (absolute_time_diff_us(s, get_absolute_time()) > 2000) {
+          ejectState = ejectCurrent;
+          //Eject button pressed, toggle tray position
+          if (!ejectCurrent) {
+            close_tray((status & DOOR_CLOSED) == 0);
           }
+          debounceEject = false;
+        }
       } else {
-          if (debounceEject && (absolute_time_diff_us(s, get_absolute_time()) > 2000)) debounceEject = false;
+        if (debounceEject && (absolute_time_diff_us(s, get_absolute_time()) > 2000)) debounceEject = false;
       }
 
       reset_occured = false;
@@ -1086,6 +1092,7 @@ void core1_entry() {
         data_in = get3doData();
         handleCommand(data_in);
       }
+      handleMediaInterrupt();
     }
   }
 }
@@ -1149,6 +1156,7 @@ void _3DO_init() {
     sm_read = CHAN_MAX;
     offset = pio_add_program(pio0, &read_program);
     read_program_init(pio0, sm_read, offset);
+    instr_jmp_read = pio_encode_jmp(offset);
 
 
     for (int i = 0; i<32; i++) {

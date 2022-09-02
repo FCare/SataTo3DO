@@ -73,4 +73,6 @@ extern void set3doDriveMounted(bool on);
 extern void set3doDriveReady();
 extern void set3doDriveError();
 
+extern void mediaInterrupt(void);
+
 #endif

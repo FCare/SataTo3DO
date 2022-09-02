@@ -22,7 +22,12 @@ extern void getTocFull(int index, int nb);
 
 extern char* getPathForTOC(int entry);
 
+extern void printPlaylist();
+extern void clearPlaylist(void);
+extern void addToPlaylist(int entry, bool *valid, bool *added);
 
 extern bool seekTocTo(int index);
+
+extern void handleBootImage(void);
 
 #endif
