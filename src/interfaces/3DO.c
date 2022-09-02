@@ -61,6 +61,16 @@ typedef enum{
 
   GET_TOC_LIST = 0xD1,
 
+  CREATE_FILE = 0xE0,
+  OPEN_FILE = 0xE1,
+  SEEK_FILE = 0xE2,
+  READ_FILE_BYTE = 0xE3,
+  WRITE_FILE_BYTE = 0xE4,
+  CLOSE_FILE = 0xE5,
+  WRITE_FILE_OFFSET = 0xE6,
+  READ_FILE_OFFSET = 0xE7,
+
+  UPDATE_ODE = 0xF0,
 }CD_request_t;
 
 /*
@@ -480,7 +490,6 @@ void sendData(int startlba, int nb_block, bool trace) {
 
     if (!gpio_get(CDRST)) return;
     if (isAudioBlock(startlba)) {
-      printf("audio Block\n");
       if (is_nil_time(lastPacket)) {
         lastPacket = delayed_by_us(get_absolute_time(),13333);
       } else {
@@ -553,7 +562,6 @@ void handleCommand(uint32_t data) {
   gpio_put(LED, ledState);
   ledState = !ledState;
 
-printf("%x\n", request);
   switch(request) {
     case READ_ID:
     for (int i=0; i<6; i++) {
@@ -780,7 +788,7 @@ printf("%x\n", request);
         for (int i=0; i<6; i++) {
           data_in[i] = GET_BUS(get3doData());
         }
-        LOG_SATA("SET_MODE %x %x %x %x %x %x\n", data_in[0], data_in[1], data_in[2], data_in[3], data_in[4], data_in[5]);
+        printf("SET_MODE %x %x %x %x %x %x\n", data_in[0], data_in[1], data_in[2], data_in[3], data_in[4], data_in[5]);
         /*
         not entirely full
 [18:04]
@@ -1000,7 +1008,94 @@ what's your reply to 0x83?
         } else break;
       }
       printf("\n");
-
+      break;
+    //Not supported yet
+    case CREATE_FILE:
+      for (int i=0; i<6; i++) {
+        data_in[i] = GET_BUS(get3doData());
+      }
+      LOG_SATA("CREATE_FILE\n");
+      buffer[index++] = CREATE_FILE;
+      buffer[index++] = 0; //Always report a failure
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case OPEN_FILE:
+      for (int i=0; i<6; i++) {
+        data_in[i] = GET_BUS(get3doData());
+      }
+      LOG_SATA("OPEN_FILE\n");
+      buffer[index++] = OPEN_FILE;
+      buffer[index++] = 0; //Always report a failure
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case SEEK_FILE:
+      for (int i=0; i<6; i++) {
+        data_in[i] = GET_BUS(get3doData());
+      }
+      LOG_SATA("SEEK_FILE\n");
+      buffer[index++] = SEEK_FILE;
+      buffer[index++] = status;
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case READ_FILE_BYTE:
+      for (int i=0; i<6; i++) {
+        data_in[i] = GET_BUS(get3doData());
+      }
+      LOG_SATA("READ_FILE_BYTE\n");
+      buffer[index++] = READ_FILE_BYTE;
+      buffer[index++] = 0; //Always report a failure
+      buffer[index++] = 0; //Always report a failure
+      buffer[index++] = status;
+    sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case WRITE_FILE_BYTE:
+    for (int i=0; i<6; i++) {
+      data_in[i] = GET_BUS(get3doData());
+    }
+    LOG_SATA("WRITE_FILE_BYTE\n");
+    buffer[index++] = WRITE_FILE_BYTE;
+    buffer[index++] = 0; //Always report a failure
+    buffer[index++] = 0; //Always report a failure
+    buffer[index++] = status;
+    sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case CLOSE_FILE:
+    for (int i=0; i<6; i++) {
+      data_in[i] = GET_BUS(get3doData());
+    }
+    LOG_SATA("CLOSE_FILE\n");
+    buffer[index++] = CLOSE_FILE;
+    buffer[index++] = status;
+    sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case WRITE_FILE_OFFSET:
+    for (int i=0; i<6; i++) {
+      data_in[i] = GET_BUS(get3doData());
+    }
+    LOG_SATA("WRITE_FILE_OFFSET\n");
+    buffer[index++] = WRITE_FILE_OFFSET;
+    buffer[index++] = status;
+    sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case READ_FILE_OFFSET:
+    for (int i=0; i<6; i++) {
+      data_in[i] = GET_BUS(get3doData());
+    }
+    LOG_SATA("READ_FILE_OFFSET\n");
+    buffer[index++] = READ_FILE_OFFSET;
+    buffer[index++] = status;
+    sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      break;
+    case UPDATE_ODE:
+    for (int i=0; i<6; i++) {
+      data_in[i] = GET_BUS(get3doData());
+    }
+    LOG_SATA("UPDATE_ODE\n");
+    buffer[index++] = UPDATE_ODE;
+    buffer[index++] = status;
+    sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
     default: LOG_SATA("unknown Cmd %x\n", request);
   }
