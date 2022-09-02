@@ -93,7 +93,7 @@ static bool check_eject() {
 }
 
 void USB_reset(void) {
-  printf("reset usb\n");
+  LOG_SATA("reset usb\n");
   usb_state = 0;
   startClose = false;
   tuh_msc_umount_cb(currentDisc.dev_addr);
@@ -129,15 +129,15 @@ bool USBDriveEject(bool eject, bool *interrupt) {
     *interrupt = !eject;
     if (!usb_state & ENUMERATED) {
       requestEject = (eject?0:1);
-      printf("usb not enumearated\n");
+      LOG_SATA("usb not enumerated\n");
       return true;
     }
     if (requestEject != -1) {
-      printf("Eject already requested %d\n", requestEject);
+      LOG_SATA("Eject already requested %d\n", requestEject);
       return false;
     }
     requestEject = (eject?0:1);
-    printf("requesting eject %d\n", requestEject);
+    LOG_SATA("requesting eject %d\n", requestEject);
     return true;
   }
   if ((usb_state & PERIPH_TYPE) == MSC_TYPE) {

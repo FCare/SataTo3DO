@@ -177,14 +177,14 @@ static void check_subq() {
 }
 
 void printPlaylist(void) {
-  printf("Playlist:\n");
+  LOG_SATA("Playlist:\n");
   for (int i =0; i<playlist.nb_entries; i++) {
-    printf("%d: %s\n", i, playlist.path[i]);
+    LOG_SATA("%d: %s\n", i, playlist.path[i]);
   }
 }
 
 void clearPlaylist(void) {
-  printf("Clear laylist!\n");
+  LOG_SATA("Clear laylist!\n");
   for (int i=0; i<playlist.nb_entries; i++) {
     if (playlist.path[i] != NULL) {
       free(playlist.path[i]);
@@ -212,7 +212,7 @@ void addToPlaylist(int entry, bool *valid, bool *added) {
   }
   *added = true;
   playlist.path[playlist.nb_entries++] = entry_path;
-  printf("Add to playlist %s %d\n", entry_path, playlist.nb_entries);
+  LOG_SATA("Add to playlist %s %d\n", entry_path, playlist.nb_entries);
 }
 
 static void check_block() {
@@ -241,24 +241,24 @@ static void check_block() {
       }
     }
     if (last_pos != offset)
-      if (f_lseek(fileOpen, offset) != FR_OK) printf("Can not seek %s\n", curBinPath);
+      if (f_lseek(fileOpen, offset) != FR_OK) LOG_SATA("Can not seek %s\n", curBinPath);
     last_pos = offset;
     if (is_audio) {
       if (has_subQ) {
         //Work only for 1 block here
         FSIZE_t data_offset = 0;
 
-          if (f_read(fileOpen, &buffer_Block[data_offset], currentDisc.block_size, &read_nb) != FR_OK) printf("Can not read %s\n", curBinPath);
+          if (f_read(fileOpen, &buffer_Block[data_offset], currentDisc.block_size, &read_nb) != FR_OK) LOG_SATA("Can not read %s\n", curBinPath);
           data_offset += read_nb;
           for (int i = currentDisc.block_size; i < currentDisc.block_size_read; i++) {
             buffer_Block[data_offset++] = 0;
           }
       } else {
-        if (f_read(fileOpen, &buffer_Block[0], currentDisc.block_size_read, &read_nb) != FR_OK) printf("Can not read %s\n", curBinPath);
+        if (f_read(fileOpen, &buffer_Block[0], currentDisc.block_size_read, &read_nb) != FR_OK) LOG_SATA("Can not read %s\n", curBinPath);
       }
     } else {
-      if (f_read(fileOpen, buffer_Block, nb_block_Block*currentDisc.block_size_read, &read_nb) != FR_OK) printf("Can not read %s\n", curBinPath);
-      if (read_nb != nb_block_Block*currentDisc.block_size_read) printf("Bad read %d %d\n", read_nb, nb_block_Block*currentDisc.block_size_read);
+      if (f_read(fileOpen, buffer_Block, nb_block_Block*currentDisc.block_size_read, &read_nb) != FR_OK) LOG_SATA("Can not read %s\n", curBinPath);
+      if (read_nb != nb_block_Block*currentDisc.block_size_read) LOG_SATA("Bad read %d %d\n", read_nb, nb_block_Block*currentDisc.block_size_read);
       last_pos += read_nb;
     }
     usb_state &= ~COMMAND_ON_GOING;
@@ -325,10 +325,10 @@ static bool LoadfromCue(char *filePath) {
   bool  valid = false;
   char line[100];
   unsigned int track_num = 0;
-  printf("Load From Cue %s\n", filePath);
+  LOG_SATA("Load From Cue %s\n", filePath);
   fr = f_open(&myFile, filePath, FA_READ);
   if (fr){
-     printf("can not open %s for reading\n",filePath);
+     LOG_SATA("can not open %s for reading\n",filePath);
      return false;
   }
 
@@ -492,11 +492,11 @@ static bool ValidateInfofromCue(FILINFO *fileInfo) {
   sprintf(&newPath[0], "%s\\%s", curPath, fileInfo->fname);
   fr = f_open(&myFile, newPath, FA_READ);
   if (fr){
-     printf("can not open %s for reading\n",newPath);
+     LOG_SATA("can not open %s for reading\n",newPath);
      return false;
   }
 
-  printf("Validate Game %s\n", newPath);
+  LOG_SATA("Validate Game %s\n", newPath);
   // Time to generate TOC
   for (;;)
   {
@@ -642,11 +642,11 @@ static bool LoadfromIso(char *filePath) {
     currentDisc.offset = 0;
   } else {
     //Bad format
-    printf("File is %d bytes length\n", fileInfo.fsize);
+    LOG_SATA("File is %d bytes length\n", fileInfo.fsize);
     return false;
   }
 
-  printf("Load Game %s\n", filePath);
+  LOG_SATA("Load Game %s\n", filePath);
 
   if (curBinPath != NULL) free(curBinPath);
   curBinPath = filePath;
@@ -698,7 +698,7 @@ static bool extractBootImage(FILINFO *fileInfo) {
     currentDisc.offset = 0;
   } else {
     //Bad format
-    printf("File is %d bytes length\n", fileInfo->fsize);
+    LOG_SATA("File is %d bytes length\n", fileInfo->fsize);
     free(newPath);
     return false;
   }
@@ -765,7 +765,7 @@ static bool buildDir(dir_t *dirInfo, char *path) {
   bool ended = false;
   bool hasGame = false;
   level++;
-  printf("Explore %s (%d)\n", path, level);
+  LOG_SATA("Explore %s (%d)\n", path, level);
   FRESULT res = f_findfirst(&dirInfo->dir, &fileInfo, path, "*");
   do {
     ended = (strlen(fileInfo.fname) == 0) || (level >= 2) || (res != FR_OK);
@@ -789,7 +789,6 @@ static bool buildDir(dir_t *dirInfo, char *path) {
       res = f_findnext(&dirInfo->dir, &fileInfo);
     }
   } while(!ended);
-  if (hasGame) printf("Dir %s\n", path);
   level--;
   return hasGame;
 }
@@ -798,29 +797,29 @@ void loadPlaylistEntry() {
   FRESULT res;
   FILINFO fileInfo;
   if (!currentDisc.mounted) {
-    printf("Disk is not mounted\n");
+    LOG_SATA("Disk is not mounted\n");
     onMountMode = BOOT_PLAYLIST;
     return;
   }
-  printf("try to load %d %s\n", playlist.current_entry, playlist.path[playlist.current_entry]);
+  LOG_SATA("try to load %d %s\n", playlist.current_entry, playlist.path[playlist.current_entry]);
   if (loadFile(playlist.path[playlist.current_entry])) {
-    printf("Load entry %d\n",playlist.current_entry);
+    LOG_SATA("Load entry %d\n",playlist.current_entry);
     playlist.current_entry++;
     if (playlist.current_entry == playlist.nb_entries) {
-      printf("Playlist done - clearing\n");
+      LOG_SATA("Playlist done - clearing\n");
       clearPlaylist();
     }
 
     // memcpy(&currentDisc, &allImage[selected_img].info, sizeof(cd_s));
     if (f_open(&curFile, curBinPath, FA_READ) == FR_OK) {
-      printf("Game loaded\n");
+      LOG_SATA("Game loaded\n");
       last_pos = 0;
       usb_state |= DISC_MOUNTED;
       usb_state &= ~COMMAND_ON_GOING;
       set3doCDReady(true);
       set3doDriveMounted(true);
     } else {
-      printf("Can not open the Game!\n");
+      LOG_SATA("Can not open the Game!\n");
     }
   }
 }
@@ -849,19 +848,19 @@ void loadBootIso() {
         set3doCDReady(true);
         set3doDriveMounted(true);
       } else {
-        printf("Can not open the Game!\n");
+        LOG_SATA("Can not open the Game!\n");
       }
     }
   }
 }
 
 void handleBootImage(void) {
-  printf("Handle Boot image %d (%d)\n", onMountMode, playlist.nb_entries);
+  LOG_SATA("Handle Boot image %d (%d)\n", onMountMode, playlist.nb_entries);
   if (playlist.nb_entries != 0) {
-    printf("Handle playlist\n");
+    LOG_SATA("Handle playlist\n");
     loadPlaylistEntry();
   } else {
-    printf("Handle boot.iso\n");
+    LOG_SATA("Handle boot.iso\n");
     loadBootIso();
   }
 }
@@ -869,7 +868,7 @@ void handleBootImage(void) {
 bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   FRESULT result;
   requestEject = -1;
-  printf("MSC_Inquiry\n");
+  LOG_SATA("MSC_Inquiry\n");
   result = f_mount(&DiskFATState, "" , 1);
   if (result!=FR_OK) return false;
 
@@ -892,14 +891,12 @@ void setTocLevel(int index) {
   FILINFO fileInfo;
   int curDirNb = 0;
   if (index == -1) {
-    printf("Try to go back from %s\n", curPath);
     char *lastDir = rindex(curPath, '\\');
     if (lastDir != NULL) {
       bool found = false;
       char *newPath = malloc(lastDir - curPath + 1);
       memcpy(newPath, curPath, lastDir - curPath);
       newPath[lastDir-curPath] = 0;
-      printf("new Path %s old entry %s\n", newPath, lastDir+1);
       f_closedir(&curDir->dir);
       res = f_opendir(&curDir->dir, newPath);
       current_toc_offset = 0;
@@ -908,7 +905,6 @@ void setTocLevel(int index) {
       current_toc = 0;
       current_toc_level -= 1;
     }
-    printf("Current Toc is %d\n", current_toc);
     return;
   }
   if (current_toc != index) {
@@ -924,7 +920,7 @@ void setTocLevel(int index) {
       }
       if (fileInfo.fname[0] == 0) {
         //Should raise en arror. Shall never happen
-        printf("!!! WTF not found\n");
+        LOG_SATA("!!! WTF not found\n");
         return; //End of file list
       }
     }
@@ -939,7 +935,7 @@ void setTocLevel(int index) {
       current_toc_offset = 0;
       current_toc_level++;
     } else {
-      printf("!!! WTF not a directory\n");
+      LOG_SATA("!!! WTF not a directory\n");
     }
   }
   current_toc = index;

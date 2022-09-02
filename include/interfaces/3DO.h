@@ -64,7 +64,7 @@
 #define DATA_MASK ((1<<CDD0)|(1<<CDD1)|(1<<CDD2)|(1<<CDD3)|(1<<CDD4)|(1<<CDD5)|(1<<CDD6)|(1<<CDD7))
 #define CTRL_MASK ((1<<EJECT)|(1<<CDEN)|(1<<CDRST)|(1<<CDHRD)|(1<<CDHWR)|(1<<CDCMD))
 
-#define LOG_SATA printf
+#define LOG_SATA //printf
 
 
 extern void _3DO_init();

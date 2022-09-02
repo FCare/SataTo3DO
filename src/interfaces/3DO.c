@@ -162,16 +162,18 @@ uint nbWord = 0;
 
 static bool use_cdrom = false;
 
+static int pitch = 0;
+
 volatile bool interrupt = false;
 
 uint8_t errorCode = POWER_OR_RESET_OCCURED;
 uint8_t status = DOOR_CLOSED | CHECK_ERROR;
 
 void close_tray(bool close) {
-  printf("Ask to eject %d\n", close);
+  LOG_SATA("Ask to eject %d\n", close);
   bool interrupt = false;
   if (!USBDriveEject(!close, &interrupt)) {
-    printf("Can not eject/inject\n");
+    LOG_SATA("Can not eject/inject\n");
     return;
   }
   // status &= ~DOOR_CLOSED;
@@ -200,15 +202,15 @@ void set3doCDReady(bool on) {
     switch(currentDisc.format) {
       case 0x0:
         if (currentDisc.hasOnlyAudio)
-          printf("Audio CD detected\n");
+          LOG_SATA("Audio CD detected\n");
         else
-          printf("Data CD detected\n");
+          LOG_SATA("Data CD detected\n");
         break;
       case 0x20:
-        printf("Photo-CD detected\n");
+        LOG_SATA("Photo-CD detected\n");
         break;
       case 0xFF:
-        printf("CD-i detected\n");
+        LOG_SATA("CD-i detected\n");
         break;
     }
   }
@@ -391,16 +393,13 @@ char* getPathForTOC(int entry) {
         int pathLength = name_length + 1 + strlen(curPath)+1;
         char* result = malloc(pathLength);
         snprintf(result, pathLength, "%s\\%s", curPath, &TOC[i]);
-        printf("return %s\n", result);
         return result;
       }
       i += name_length;
     } else {
-      printf("1: return NULL\n");
       return NULL;
     }
   }
-  printf("2: return NULL\n");
   return NULL;
 }
 
@@ -410,26 +409,24 @@ void getTocFull(int index, int nb) {
   bool ended = false;
   memset(TOC,0xff,sizeof(TOC));
   if (!seekTocTo(index)) {
-    printf("Index %d is out of files number\n", index);
+    LOG_SATA("Index %d is out of files number\n", index);
     return;
   }
   while(!ended) {
     toc_entry *te = malloc(sizeof(toc_entry));
     memset(te, 0x0, sizeof(toc_entry));
     if ((index == 0) && (id == 0) && (getTocLevel() != 0)) {
-      printf("1 %d %d %d\n", index, id, getTocLevel());
       printPlaylist();
       if (!getReturnTocEntry(te)) break;
       printPlaylist();
     } else {
-      printf("2 %d %d %d\n", index, id, getTocLevel());
       printPlaylist();
       if (!getNextTOCEntry(te)) break;
       printPlaylist();
     }
     id++;
     if ((nb != -1) && (id >= (nb+index))) {
-      printf("Id %d is out of files number %d\n", id, nb+index);
+      LOG_SATA("Id %d is out of files number %d\n", id, nb+index);
       ended = true;
     }
     TOC[toclen++]=te->flags>>24;
@@ -450,7 +447,7 @@ void getTocFull(int index, int nb) {
     if (te->name != NULL) free(te->name);
     free(te);
     if (toclen > (sizeof(TOC)-(128+13))) {
-      printf("Buffer is full\n");
+      LOG_SATA("Buffer is full\n");
       ended = true;
     }
   }
@@ -472,8 +469,7 @@ void sendData(int startlba, int nb_block, bool trace) {
   uint8_t status_buffer[2] = {READ_DATA, status};
   int start = startlba;
   absolute_time_t a,b,c,d,e, s;
-  uint8_t reste = 1;
-
+  int reste = 0;
 
   if (nb_block == 0) return;
   int id = 0;
@@ -490,15 +486,17 @@ void sendData(int startlba, int nb_block, bool trace) {
 
     if (!gpio_get(CDRST)) return;
     if (isAudioBlock(startlba)) {
+      int timeForASecond = (990 + pitch) * 1000 + reste;  //Shall be 1s but cd drive is a bit slower than expected
+      int correctedDelay = timeForASecond/75;
+      reste = timeForASecond % 75;
       if (is_nil_time(lastPacket)) {
-        lastPacket = delayed_by_us(get_absolute_time(),13333);
+        lastPacket = delayed_by_us(get_absolute_time(),correctedDelay);
       } else {
         absolute_time_t currentPacket = get_absolute_time();
         int64_t delay = absolute_time_diff_us(currentPacket, lastPacket); /*Right number shall be 1000000/75*/
         if (delay>0) sleep_us(delay);
         else lastPacket = currentPacket;
-        lastPacket = delayed_by_us(lastPacket,13333) + reste/3;
-        reste = (reste%3)+1;
+        lastPacket = delayed_by_us(lastPacket,correctedDelay);
       }
     }
     if (trace) c = get_absolute_time();
@@ -716,7 +714,7 @@ void handleCommand(uint32_t data) {
         }
         buffer[index++] = status;
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
-        printf("%d %x %d %d %d:%d:%d\n", currentDisc.mounted, buffer[1], buffer[2],buffer[3],buffer[4],buffer[5],buffer[6]);
+        LOG_SATA("%d %x %d %d %d:%d:%d\n", currentDisc.mounted, buffer[1], buffer[2],buffer[3],buffer[4],buffer[5],buffer[6]);
       }
       break;
     case READ_TOC:
@@ -736,7 +734,7 @@ void handleCommand(uint32_t data) {
         buffer[index++] = 0x0;
         buffer[index++] = status;
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
-        printf("%x %d %d:%d:%d\n", buffer[2], buffer[3],buffer[5],buffer[6],buffer[7]);
+        LOG_SATA("%x %d %d:%d:%d\n", buffer[2], buffer[3],buffer[5],buffer[6],buffer[7]);
       }
       break;
     case READ_SESSION:
@@ -764,8 +762,7 @@ void handleCommand(uint32_t data) {
         }
         buffer[index++] = status;
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
-
-        printf("%d:%d:%d\n", buffer[2], buffer[3],buffer[4]);
+        LOG_SATA("%d:%d:%d\n", buffer[2], buffer[3],buffer[4]);
       }
     break;
     case READ_CAPACITY:
@@ -788,7 +785,7 @@ void handleCommand(uint32_t data) {
         for (int i=0; i<6; i++) {
           data_in[i] = GET_BUS(get3doData());
         }
-        printf("SET_MODE %x %x %x %x %x %x\n", data_in[0], data_in[1], data_in[2], data_in[3], data_in[4], data_in[5]);
+        LOG_SATA("SET_MODE %x %x %x %x %x %x\n", data_in[0], data_in[1], data_in[2], data_in[3], data_in[4], data_in[5]);
         /*
         not entirely full
 [18:04]
@@ -835,10 +832,18 @@ what's your reply to 0x83?
 */
 
         if (data_in[0] == 0x3) {
-          if (data_in[1] & (0x80|0x40)) {
+          if (data_in[1] & (0x80)) {
             status |= DOUBLE_SPEED;
           } else {
             status &= ~DOUBLE_SPEED;
+          }
+
+          if (data_in[2] & 0x4) {
+            //Pitch correction On
+            pitch = ((data_in[2]&0x3)<<8) | data_in[3];
+            if (data_in[2]&0x2) pitch -= 1024;
+          } else {
+            pitch = 0;
           }
         }
         if (data_in[0] == 0x0) {
@@ -928,8 +933,8 @@ what's your reply to 0x83?
         offset = ((data_in[4]&0xFF)<<8)|((data_in[5]&0xFF)<<0);
         LOG_SATA("GET_TOC %d %d\n", entry, offset);
         getToc(entry, offset, &buffer[index]);
-        for (int i=0; i<16; i++) printf("%x ", buffer[index+i]);
-        printf("\n");
+        for (int i=0; i<16; i++) LOG_SATA("%x ", buffer[index+i]);
+        LOG_SATA("\n");
         index += 16;
       }
       buffer[index++] = status;
@@ -997,17 +1002,17 @@ what's your reply to 0x83?
         getTocFull(entry, offset);
       }
       sendRawData(GET_TOC_LIST, &TOC[0], 2048);
-      printf("TOC Buffer:\n");
+      LOG_SATA("TOC Buffer:\n");
       for (int i=0; i<2048;) {
         uint32_t flags = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
         if (flags != TOC_FLAG_INVALID) {
           uint32_t toc_id = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
           uint32_t name_length = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
-          printf(".flags :0x%x, .toc_id: %d, .name_length: %d, .name: %s\n", flags, toc_id, name_length, &TOC[i]);
+          LOG_SATA(".flags :0x%x, .toc_id: %d, .name_length: %d, .name: %s\n", flags, toc_id, name_length, &TOC[i]);
           i += name_length;
         } else break;
       }
-      printf("\n");
+      LOG_SATA("\n");
       break;
     //Not supported yet
     case CREATE_FILE:
@@ -1152,7 +1157,7 @@ void core1_entry() {
       gpio_put(CDEN_SNIFF, gpio_get(CDEN));
     } else {
       if (!gpio_get(CDRST)) {
-        printf("Got a reset!\n");
+        LOG_SATA("Got a reset!\n");
         reset_occured = true;
         wait_out_of_reset();
         restartReadPio();
