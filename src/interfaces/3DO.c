@@ -422,7 +422,7 @@ void getTocFull(int index, int nb) {
     }
     id++;
     if ((nb != -1) && (id >= (nb+index))) {
-      LOG_SATA("Id %d is out of files number %d\n", id, nb+index);
+      LOG_SATA("Limit has been reached on Id %d\n", id, nb+index);
       ended = true;
     }
     TOC[toclen++]=te->flags>>24;
