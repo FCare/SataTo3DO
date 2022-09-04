@@ -421,9 +421,11 @@ void getTocFull(int index, int nb) {
       if (!getNextTOCEntry(te)) break;
     }
     id++;
-    if ((nb != -1) && (id >= (nb+index))) {
-      LOG_SATA("Limit has been reached on Id %d\n", id, nb+index);
+    if ((nb != -1) && (id >= (nb))) {
+      LOG_SATA("Limit has been reached on Id %d\n", id, nb);
       ended = true;
+    } else {
+      printf("Got %d files on %d\n", id, nb+index);
     }
     TOC[toclen++]=te->flags>>24;
     TOC[toclen++]=te->flags>>16;
