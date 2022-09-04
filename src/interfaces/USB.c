@@ -13,7 +13,9 @@ static scsi_inquiry_resp_t inquiry_resp;
 
 void USB_Host_init() {
     inquiry_resp.peripheral_device_type = 0x1F;
+#ifdef USE_TRACE
     stdio_init_all();
+#endif
     tusb_init();
 }
 

@@ -50,7 +50,11 @@
 #endif
 
 // CFG_TUSB_DEBUG is defined by compiler in DEBUG build
+#ifdef USE_TRACE
+#define CFG_TUSB_DEBUG           1
+#else
 #define CFG_TUSB_DEBUG           0
+#endif
 
 /* USB DMA on some MCUs can only access a specific SRAM region with restriction on alignment.
  * Tinyusb use follows macros to declare transferring memory so that they can be put
