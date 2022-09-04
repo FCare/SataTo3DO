@@ -416,13 +416,9 @@ void getTocFull(int index, int nb) {
     toc_entry *te = malloc(sizeof(toc_entry));
     memset(te, 0x0, sizeof(toc_entry));
     if ((index == 0) && (id == 0) && (getTocLevel() != 0)) {
-      printPlaylist();
       if (!getReturnTocEntry(te)) break;
-      printPlaylist();
     } else {
-      printPlaylist();
       if (!getNextTOCEntry(te)) break;
-      printPlaylist();
     }
     id++;
     if ((nb != -1) && (id >= (nb+index))) {
