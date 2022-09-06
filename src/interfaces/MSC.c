@@ -795,11 +795,6 @@ static bool buildDir(dir_t *dirInfo, char *path) {
 void loadPlaylistEntry() {
   FRESULT res;
   FILINFO fileInfo;
-  if (!currentDisc.mounted) {
-    LOG_SATA("Disk is not mounted\n");
-    onMountMode = BOOT_PLAYLIST;
-    return;
-  }
   LOG_SATA("try to load %d %s\n", playlist.current_entry, playlist.path[playlist.current_entry]);
   if (loadFile(playlist.path[playlist.current_entry])) {
     LOG_SATA("Load entry %d\n",playlist.current_entry);
@@ -871,8 +866,7 @@ bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
     return false;
   }
 
-  if (onMountMode == BOOT_ISO) loadBootIso();
-  if (onMountMode == BOOT_PLAYLIST) loadPlaylistEntry();
+  handleBootImage();
 }
 
 static int current_toc = 0;

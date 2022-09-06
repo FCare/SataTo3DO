@@ -175,13 +175,9 @@ void close_tray(bool close) {
     return;
   }
   // status &= ~TRAY_IN;
-  if (interrupt) {
-    mediaInterrupt();
-  } else {
-    set3doDriveMounted(false);
-    status |= CHECK_ERROR;
-    errorCode |= DISC_REMOVED;
-  }
+  set3doDriveMounted(false);
+  status |= CHECK_ERROR;
+  errorCode |= DISC_REMOVED;
 }
 
 void wait_out_of_reset() {
@@ -543,7 +539,6 @@ void handleMediaInterrupt() {
   while (!pio_sm_is_rx_fifo_empty(pio0, sm_read)) {
     pio_sm_get(pio0, sm_read);
   }
-  handleBootImage();
   gpio_put(CDMDCHG, 1); //Under reset
   // pio_sm_set_enabled(pio0, sm_read, false);
   // errorCode |= POWER_OR_RESET_OCCURED;
@@ -993,7 +988,7 @@ what's your reply to 0x83?
       buffer[index++] = LAUNCH_PLAYLIST;
       buffer[index++] = status;
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
-      mediaInterrupt();
+      set3doDriveMounted(false);
       break;
     case GET_TOC_LIST:
       for (int i=0; i<6; i++) {
@@ -1156,7 +1151,6 @@ void core1_entry() {
   }
 
   LOG_SATA("Ready\n");
-  handleBootImage();
   while (1){
 
     if (use_cdrom) {
@@ -1167,6 +1161,7 @@ void core1_entry() {
         LOG_SATA("Got a reset!\n");
         reset_occured = true;
         wait_out_of_reset();
+        handleBootImage();
         restartReadPio();
         errorCode |= POWER_OR_RESET_OCCURED;
         status |= CHECK_ERROR;
