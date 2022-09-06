@@ -20,12 +20,11 @@ dir_t *curDir = NULL;
 char *curPath = NULL;
 
 typedef enum {
-  BOOT_NONE = 0,
-  BOOT_ISO,
+  BOOT_ISO = 1,
   BOOT_PLAYLIST,
 } mount_mode;
 
-static mount_mode onMountMode = BOOT_NONE;
+static mount_mode onMountMode = BOOT_ISO;
 
 #define PLAYLIST_MAX 16
 typedef struct playlist_entry_s{
@@ -827,10 +826,7 @@ void loadPlaylistEntry() {
 void loadBootIso() {
   FRESULT res;
   FILINFO fileInfo;
-  if (!currentDisc.mounted) {
-    onMountMode = BOOT_ISO;
-    return;
-  }
+  LOG_SATA("Load boot.iso\n");
   curDir = getNewDir();
   curPath = (char *) malloc(3);
   sprintf(curPath, "0:");
@@ -870,9 +866,10 @@ bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   requestEject = -1;
   LOG_SATA("MSC_Inquiry\n");
   result = f_mount(&DiskFATState, "" , 1);
-  if (result!=FR_OK) return false;
-
-  currentDisc.mounted = true;
+  if (result!=FR_OK) {
+    LOG_SATA("Can not mount\n");
+    return false;
+  }
 
   if (onMountMode == BOOT_ISO) loadBootIso();
   if (onMountMode == BOOT_PLAYLIST) loadPlaylistEntry();

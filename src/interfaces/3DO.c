@@ -97,14 +97,12 @@ case 0xf0: dev_ode_startupdate(); break;
 */
 
 typedef enum{
-  DOOR_CLOSED =	0x80,
-  CADDY_IN = 0x40,
+  TRAY_IN =	0x80,
+  DISC_PRESENT = 0x40,
   SPINNING = 0x20,
   CHECK_ERROR = 0x10,
-  BUSY_NEW = 0x8,
-  DOOR_LOCKED = 0x04,
   DOUBLE_SPEED = 0x02,
-  DISK_OK = 0x01
+  DISC_RDY = 0x01
 }CD_status_t;
 
 typedef enum{
@@ -167,7 +165,7 @@ static int pitch = 0;
 volatile bool interrupt = false;
 
 uint8_t errorCode = POWER_OR_RESET_OCCURED;
-uint8_t status = DOOR_CLOSED | CHECK_ERROR;
+uint8_t status = TRAY_IN | CHECK_ERROR;
 
 void close_tray(bool close) {
   LOG_SATA("Ask to eject %d\n", close);
@@ -176,11 +174,11 @@ void close_tray(bool close) {
     LOG_SATA("Can not eject/inject\n");
     return;
   }
-  // status &= ~DOOR_CLOSED;
+  // status &= ~TRAY_IN;
   if (interrupt) {
     mediaInterrupt();
   } else {
-    currentDisc.mounted = false;
+    set3doDriveMounted(false);
     status |= CHECK_ERROR;
     errorCode |= DISC_REMOVED;
   }
@@ -214,15 +212,20 @@ void set3doCDReady(bool on) {
         break;
     }
   }
-  if (on && (currentDisc.format <= 0xF0)) status |= DISK_OK;
-  else status &= ~DISK_OK;
+  // if (on && (currentDisc.format <= 0xF0)) status |= DISC_RDY;
+  // else status &= ~DISC_RDY;
 }
 
 void set3doDriveMounted(bool on) {
+  printf("Mounted current %d new %d\n", currentDisc.mounted, on);
   if (on) {
-    status |= CADDY_IN | SPINNING;
+    status |= DISC_PRESENT | SPINNING;
   } else {
-    status &= ~CADDY_IN & ~SPINNING;
+    status &= ~DISC_PRESENT & ~SPINNING;
+  }
+  if (currentDisc.mounted != on) {
+    currentDisc.mounted = on;
+    mediaInterrupt();
   }
 }
 
@@ -233,7 +236,7 @@ void set3doDriveError() {
   errorOnDisk = 1;
   errorCode = SOFT_READ_RETRY;
   status |= CHECK_ERROR;
-  status &= ~DISK_OK;
+  status &= ~DISC_RDY;
   status &= ~SPINNING;
   USB_reset();
 }
@@ -519,7 +522,7 @@ void sendRawData(int command, uint8_t *buffer, int length) {
 static bool hasMediaInterrupt = false;
 void mediaInterrupt(void) {
   hasMediaInterrupt = true;
-  // status |= DOOR_CLOSED;
+  // status |= TRAY_IN;
 }
 void handleMediaInterrupt() {
   if (!hasMediaInterrupt) return;
@@ -602,7 +605,7 @@ void handleCommand(uint32_t data) {
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
       }
-      LOG_SATA("READ ERROR\n");
+      LOG_SATA("READ ERROR %x %x\n", errorCode, status);
       buffer[index++] = READ_ERROR;
       buffer[index++] = 0x00;
       buffer[index++] = 0x00;
@@ -614,6 +617,10 @@ void handleCommand(uint32_t data) {
       buffer[index++] = 0x00;
       status &= ~CHECK_ERROR;
       errorCode = NO_ERROR;
+      if (!currentDisc.mounted) {
+        errorCode = DISC_REMOVED;
+        status |= DISC_RDY;
+      }
       buffer[index++] = status;
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
@@ -623,8 +630,13 @@ void handleCommand(uint32_t data) {
       }
       LOG_SATA("DATA_PATH_CHECK\n");
       buffer[index++] = DATA_PATH_CHECK;
-      buffer[index++] = 0xAA; //This means ok
-      buffer[index++] = 0x55; //This means ok. Not the case when no disc
+      if (!currentDisc.mounted) {
+        buffer[index++] = 0xA5; //This means ok
+        buffer[index++] = 0xA5; //This means ok. Not the case when no disc
+      } else {
+        buffer[index++] = 0xAA; //This means ok
+        buffer[index++] = 0x55; //This means ok. Not the case when no disc
+      }
       buffer[index++] = status;
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
@@ -635,11 +647,11 @@ void handleCommand(uint32_t data) {
         }
         LOG_SATA("SPIN UP\n");
         buffer[index++] = SPIN_UP;
-        if (!(status & DOOR_CLOSED)) {
+        if (!(status & TRAY_IN)) {
             status |= CHECK_ERROR;
             errorCode |= ILLEGAL_CMD;
         } else {
-          if (!(status & DISK_OK)) {
+          if (!(status & DISC_RDY)) {
             status |= CHECK_ERROR;
             errorCode |= DISC_REMOVED;
           } else {
@@ -1177,7 +1189,7 @@ void core1_entry() {
           ejectState = ejectCurrent;
           //Eject button pressed, toggle tray position
           if (!ejectCurrent) {
-            close_tray((status & DOOR_CLOSED) == 0);
+            close_tray((status & TRAY_IN) == 0);
           }
           debounceEject = false;
         }

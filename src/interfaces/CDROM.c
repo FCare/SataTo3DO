@@ -69,7 +69,6 @@ bool CDROM_ExecuteEject(bool eject) {
     if (!eject) {
       set3doCDReady(false);
       set3doDriveMounted(false);
-      currentDisc.mounted = false;
       usb_state &= ~DISC_MOUNTED;
     }
     return true;
@@ -152,7 +151,6 @@ static bool read_header_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_
     //Photo CD shall have an audio track. CD-i are Mode 2 but without audio.
     currentDisc.format = 0x20; //Only CD-ROM, CD-DA and CD-XA are supported
   }
-  currentDisc.mounted = true;
   usb_state |= DISC_MOUNTED;
   set3doCDReady(true);
   set3doDriveMounted(true);
