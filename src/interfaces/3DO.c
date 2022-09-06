@@ -164,8 +164,8 @@ static int pitch = 0;
 
 volatile bool interrupt = false;
 
-uint8_t errorCode = POWER_OR_RESET_OCCURED;
-uint8_t status = TRAY_IN | CHECK_ERROR;
+static uint8_t errorCode = DISC_REMOVED;
+static uint8_t status = TRAY_IN | CHECK_ERROR | DISC_RDY;
 
 void close_tray(bool close) {
   LOG_SATA("Ask to eject %d\n", close);
@@ -233,6 +233,7 @@ void set3doDriveReady() {
 }
 
 void set3doDriveError() {
+  LOG_SATA("Drive error\n");
   errorOnDisk = 1;
   errorCode = SOFT_READ_RETRY;
   status |= CHECK_ERROR;
@@ -617,10 +618,6 @@ void handleCommand(uint32_t data) {
       buffer[index++] = 0x00;
       status &= ~CHECK_ERROR;
       errorCode = NO_ERROR;
-      if (!currentDisc.mounted) {
-        errorCode = DISC_REMOVED;
-        status |= DISC_RDY;
-      }
       buffer[index++] = status;
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
