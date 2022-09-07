@@ -51,10 +51,12 @@ extern volatile bool read_done;
 
 #if CFG_TUH_MSC
 static bool check_eject();
-// static void check_speed();
+static bool check_load();
 static void check_block();
 static void check_subq();
 #endif
+
+static void handleBootImage(void);
 
 static FSIZE_t last_pos = 0;
 
@@ -67,6 +69,7 @@ bool MSC_Host_loop()
     if(usb_state & ENUMERATED) {
       if (!(usb_state & COMMAND_ON_GOING)) {
         if (!check_eject()) {
+          check_load();
           if (usb_state & DISC_MOUNTED) {
             // check_speed();
             check_block();
@@ -76,6 +79,8 @@ bool MSC_Host_loop()
             return false;
           }
         }
+      } else {
+        check_load();
       }
     }
     return true;
@@ -135,6 +140,16 @@ static bool check_eject() {
     //Execute right now
     LOG_SATA("Eject %d\n", requestEject);
     requestEject = -1;
+    return true;
+  }
+  return false;
+}
+
+static bool check_load() {
+  if (requestLoad!=-1) {
+    //Execute right now
+    handleBootImage();
+    requestLoad = -1;
     return true;
   }
   return false;
@@ -845,7 +860,7 @@ void loadBootIso() {
   }
 }
 
-void handleBootImage(void) {
+static void handleBootImage(void) {
   LOG_SATA("Handle Boot image %d (%d)\n", onMountMode, playlist.nb_entries);
   if (playlist.nb_entries != 0) {
     LOG_SATA("Handle playlist\n");
@@ -865,8 +880,7 @@ bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
     LOG_SATA("Can not mount\n");
     return false;
   }
-
-  handleBootImage();
+  mediaInterrupt();
 }
 
 static int current_toc = 0;

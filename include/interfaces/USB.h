@@ -18,6 +18,7 @@ typedef enum {
 
 extern uint8_t usb_state;
 extern volatile int8_t requestEject;
+extern volatile int8_t requestLoad;
 
 extern void USB_Host_init();
 extern void USB_Host_loop();

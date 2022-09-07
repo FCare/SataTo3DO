@@ -160,6 +160,10 @@ uint nbWord = 0;
 
 static bool use_cdrom = false;
 
+static bool ledState = false;
+
+static bool canHandleReset = false;
+
 static int pitch = 0;
 
 volatile bool interrupt = false;
@@ -175,9 +179,7 @@ void close_tray(bool close) {
     return;
   }
   // status &= ~TRAY_IN;
-  set3doDriveMounted(false);
-  status |= CHECK_ERROR;
-  errorCode |= DISC_REMOVED;
+  mediaInterrupt();
 }
 
 void wait_out_of_reset() {
@@ -213,7 +215,6 @@ void set3doCDReady(bool on) {
 }
 
 void set3doDriveMounted(bool on) {
-  printf("Mounted current %d new %d\n", currentDisc.mounted, on);
   if (on) {
     status |= DISC_PRESENT | SPINNING;
   } else {
@@ -221,7 +222,6 @@ void set3doDriveMounted(bool on) {
   }
   if (currentDisc.mounted != on) {
     currentDisc.mounted = on;
-    mediaInterrupt();
   }
 }
 
@@ -517,13 +517,21 @@ void sendRawData(int command, uint8_t *buffer, int length) {
 }
 
 static bool hasMediaInterrupt = false;
+static bool hadMediaInterrupt = false;
 void mediaInterrupt(void) {
   hasMediaInterrupt = true;
+  // canHandleReset = false;
   // status |= TRAY_IN;
 }
 void handleMediaInterrupt() {
   if (!hasMediaInterrupt) return;
+  if (currentDisc.mounted && !canHandleReset) {
+    gpio_put(LED, ledState);
+    ledState = !ledState;
+    return;
+  }
   hasMediaInterrupt = false;
+  hadMediaInterrupt = true;
   // gpio_set_dir(CDRST, true);
   // gpio_put(CDRST, 0);
   // pio_sm_set_enabled(pio0, sm_read, false);
@@ -542,9 +550,9 @@ void handleMediaInterrupt() {
   gpio_put(CDMDCHG, 1); //Under reset
   // pio_sm_set_enabled(pio0, sm_read, false);
   // errorCode |= POWER_OR_RESET_OCCURED;
+  errorCode = DISC_REMOVED;
+  status |= CHECK_ERROR;
 }
-
-static bool ledState = false;
 
 void handleCommand(uint32_t data) {
   CD_request_t request = (CD_request_t) GET_BUS(data);
@@ -584,6 +592,7 @@ void handleCommand(uint32_t data) {
         data_in[i] = get3doData();
       }
       LOG_SATA("EJECT\n");
+      canHandleReset = true;
       close_tray(false);
       buffer[index++] = status;
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
@@ -631,6 +640,7 @@ void handleCommand(uint32_t data) {
       }
       buffer[index++] = status;
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      canHandleReset = true;
       break;
     case SPIN_UP:
       if (currentDisc.mounted) {
@@ -988,7 +998,7 @@ what's your reply to 0x83?
       buffer[index++] = LAUNCH_PLAYLIST;
       buffer[index++] = status;
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
-      set3doDriveMounted(false);
+      mediaInterrupt();
       break;
     case GET_TOC_LIST:
       for (int i=0; i<6; i++) {
@@ -1158,26 +1168,31 @@ void core1_entry() {
       gpio_put(CDEN_SNIFF, gpio_get(CDEN));
     } else {
       if (!gpio_get(CDRST)) {
-        LOG_SATA("Got a reset!\n");
+        LOG_SATA("Got a reset Status!\n");
         reset_occured = true;
         wait_out_of_reset();
-        handleBootImage();
+        set3doDriveMounted(false);
+        status = TRAY_IN | CHECK_ERROR | DISC_RDY;
+        errorCode = POWER_OR_RESET_OCCURED;
         restartReadPio();
-        errorCode |= POWER_OR_RESET_OCCURED;
-        status |= CHECK_ERROR;
-
       }
       if (gpio_get(CDEN)) {
         LOG_SATA("CD is not enabled\n");
         while(gpio_get(CDEN));
-        LOG_SATA("CD is enabled now\n");
+        LOG_SATA("CD is enabled now %d\n", hadMediaInterrupt);
+        if (hadMediaInterrupt) {
+          //on first CD enable after a media interrupt
+          canHandleReset = false;
+          requestLoad = 1;
+          hadMediaInterrupt = false;
+        }
       }
 
       bool ejectCurrent = gpio_get(EJECT);
-      if (ejectCurrent != ejectState) {
+      if ((ejectCurrent != ejectState)) {
         if (!debounceEject) s = get_absolute_time();
         debounceEject = true;
-        if (absolute_time_diff_us(s, get_absolute_time()) > 2000) {
+        if (absolute_time_diff_us(s, get_absolute_time()) > 25000) {
           ejectState = ejectCurrent;
           //Eject button pressed, toggle tray position
           if (!ejectCurrent) {
@@ -1186,7 +1201,7 @@ void core1_entry() {
           debounceEject = false;
         }
       } else {
-        if (debounceEject && (absolute_time_diff_us(s, get_absolute_time()) > 2000)) debounceEject = false;
+        if (debounceEject && (absolute_time_diff_us(s, get_absolute_time()) > 25000)) debounceEject = false;
       }
 
       reset_occured = false;

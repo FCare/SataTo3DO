@@ -66,6 +66,7 @@ void USB_Host_loop()
 //--------------------------------------------------------------------+
 
 volatile int8_t requestEject = -1;
+volatile int8_t requestLoad = -1;
 cd_s currentDisc = {0};
 
 volatile bool inquiry_cb_flag;

@@ -28,6 +28,4 @@ extern void addToPlaylist(int entry, bool *valid, bool *added);
 
 extern bool seekTocTo(int index);
 
-extern void handleBootImage(void);
-
 #endif
