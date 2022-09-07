@@ -880,7 +880,8 @@ bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
     LOG_SATA("Can not mount\n");
     return false;
   }
-  mediaInterrupt();
+  handleBootImage();
+  // mediaInterrupt();
 }
 
 static int current_toc = 0;

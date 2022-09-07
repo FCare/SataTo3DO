@@ -168,7 +168,7 @@ static int pitch = 0;
 
 volatile bool interrupt = false;
 
-static uint8_t errorCode = DISC_REMOVED;
+static uint8_t errorCode = POWER_OR_RESET_OCCURED;
 static uint8_t status = TRAY_IN | CHECK_ERROR | DISC_RDY;
 
 void close_tray(bool close) {
@@ -222,6 +222,8 @@ void set3doDriveMounted(bool on) {
   }
   if (currentDisc.mounted != on) {
     currentDisc.mounted = on;
+    errorCode = DISC_REMOVED;
+    status |= CHECK_ERROR;
   }
 }
 
@@ -425,7 +427,7 @@ void getTocFull(int index, int nb) {
       LOG_SATA("Limit has been reached on Id %d\n", id, nb);
       ended = true;
     } else {
-      printf("Got %d files on %d\n", id, nb+index);
+      LOG_SATA("Got %d files on %d\n", id, nb+index);
     }
     TOC[toclen++]=te->flags>>24;
     TOC[toclen++]=te->flags>>16;
@@ -476,7 +478,9 @@ void sendData(int startlba, int nb_block, bool trace) {
     int current = id;
     int data_idx = 0;
     if (trace) a= get_absolute_time();
-    if (!currentDisc.mounted) return;
+    if (!currentDisc.mounted) {
+      return;
+    }
 
     readBlock(startlba, 1, currentDisc.block_size_read, &buffer[0]);
     if (trace) b= get_absolute_time();
@@ -550,8 +554,6 @@ void handleMediaInterrupt() {
   gpio_put(CDMDCHG, 1); //Under reset
   // pio_sm_set_enabled(pio0, sm_read, false);
   // errorCode |= POWER_OR_RESET_OCCURED;
-  errorCode = DISC_REMOVED;
-  status |= CHECK_ERROR;
 }
 
 void handleCommand(uint32_t data) {
@@ -655,7 +657,7 @@ void handleCommand(uint32_t data) {
         } else {
           if (!(status & DISC_RDY)) {
             status |= CHECK_ERROR;
-            errorCode |= DISC_REMOVED;
+            errorCode = DISC_REMOVED;
           } else {
             status |= SPINNING;
           }
@@ -669,7 +671,7 @@ void handleCommand(uint32_t data) {
         for (int i=0; i<6; i++) {
           data_in[i] = GET_BUS(get3doData());
         }
-        LOG_SATA("READ DATA MSF %d:%d:%d\n", data_in[0], data_in[1], data_in[2]);
+        LOG_SATA("READ DATA MSF %d:%d:%d %x\n", data_in[0], data_in[1], data_in[2], status);
         if (data_in[3] == 0x00) {
           //MSF
           int lba = data_in[0]*60*75+data_in[1]*75+data_in[2] - 150;
