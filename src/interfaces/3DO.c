@@ -222,8 +222,10 @@ void set3doDriveMounted(bool on) {
   }
   if (currentDisc.mounted != on) {
     currentDisc.mounted = on;
-    errorCode = DISC_REMOVED;
-    status |= CHECK_ERROR;
+    if (!on) {
+      errorCode = DISC_REMOVED;
+      status |= CHECK_ERROR;
+    }
   }
 }
 
