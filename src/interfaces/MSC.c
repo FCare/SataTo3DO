@@ -1077,7 +1077,7 @@ static void check_file() {
       check_write_file();
     break;
     case CLOSE:
-      check_write_file();
+      check_close_file();
     break;
     default:
     break;
