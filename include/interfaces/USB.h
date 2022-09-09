@@ -12,6 +12,14 @@ typedef enum {
   PERIPH_TYPE = 0x30,
 } usb_state_t;
 
+
+typedef enum {
+  DONE = 0x0,
+  OPEN,
+  WRITE,
+  CLOSE
+} fileCmd_s;
+
 #define MSC_TYPE 0x10
 #define CD_TYPE 0x20
 

@@ -77,12 +77,16 @@ volatile bool read_done;
 volatile bool is_audio;
 volatile bool has_subQ;
 
+volatile bool usb_result;
+
 uint32_t start_Block;
 uint32_t nb_block_Block;
 uint8_t *buffer_Block;
 bool blockRequired = false;
 bool subqRequired = false;
 uint8_t *buffer_subq;
+
+fileCmd_s fileCmdRequired;
 
 static bool check_eject() {
   if (requestEject!=-1) {
@@ -125,6 +129,16 @@ bool read_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* c
 bool block_is_ready() {
   // usb_state &= ~COMMAND_ON_GOING;
   return read_done;
+}
+
+bool cmd_is_ready(bool *success) {
+  if (success != NULL) *success = usb_result;
+  return fileCmdRequired == DONE;
+}
+
+bool write_is_ready(bool *success) {
+  *success = usb_result;
+  return fileCmdRequired == DONE;
 }
 
 bool USBDriveEject(bool eject, bool *interrupt) {

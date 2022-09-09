@@ -19,6 +19,10 @@ typedef struct dir_s{
 dir_t *curDir = NULL;
 char *curPath = NULL;
 
+FIL curReadFile;
+FIL curWriteFile;
+char *curFilePath = NULL;
+
 typedef enum {
   BOOT_ISO = 1,
   BOOT_PLAYLIST,
@@ -40,10 +44,14 @@ extern uint32_t nb_block_Block;
 extern uint8_t *buffer_Block;
 extern bool blockRequired;
 
+extern bool read_done;
+extern fileCmd_s fileCmdRequired;
+
 extern bool subqRequired;
 extern uint8_t *buffer_subq;
 
-extern volatile bool read_done;
+extern volatile bool usb_result;
+
 
 #define SELECTED_IMAGE 22
 
@@ -53,6 +61,7 @@ extern volatile bool read_done;
 static bool check_eject();
 static bool check_load();
 static void check_block();
+static void check_file();
 static void check_subq();
 #endif
 
@@ -71,7 +80,8 @@ bool MSC_Host_loop()
         if (!check_eject()) {
           check_load();
           if (usb_state & DISC_MOUNTED) {
-            // check_speed();
+            //Interface shall be generic for command
+            check_file();
             check_block();
             check_subq();
             return true;
@@ -106,7 +116,10 @@ extern volatile bool has_subQ;
 #define NB_SUPPORTED_GAMES 100
 
 char* curBinPath; //same number as tracks number
-FIL curFile;
+FIL curBinFile;
+
+char *curBuf = NULL;
+uint16_t curBufLength = 0;
 
 static void print_error_text(FRESULT e) {
   switch (e) {
@@ -235,7 +248,7 @@ static void check_block() {
     usb_state |= COMMAND_ON_GOING;
 
     cd_s *target_track = &currentDisc;
-    FIL *fileOpen = &curFile;
+    FIL *fileOpen = &curBinFile;
     uint read_nb = 0;
     FSIZE_t offset = (start_Block - target_track->tracks[0].lba)*currentDisc.block_size + currentDisc.offset;
     // printf("Read %lu %lu %lu %lu\n", offset, currentDisc.offset, start_Block,target_track->tracks[0].lba);
@@ -820,7 +833,7 @@ void loadPlaylistEntry() {
     }
 
     // memcpy(&currentDisc, &allImage[selected_img].info, sizeof(cd_s));
-    if (f_open(&curFile, curBinPath, FA_READ) == FR_OK) {
+    if (f_open(&curBinFile, curBinPath, FA_READ) == FR_OK) {
       LOG_SATA("Game loaded\n");
       last_pos = 0;
       usb_state |= DISC_MOUNTED;
@@ -847,7 +860,7 @@ void loadBootIso() {
     //load boot.iso
     if (extractBootImage(&fileInfo)) {
       // memcpy(&currentDisc, &allImage[selected_img].info, sizeof(cd_s));
-      if (f_open(&curFile, curBinPath, FA_READ) == FR_OK) {
+      if (f_open(&curBinFile, curBinPath, FA_READ) == FR_OK) {
         last_pos = 0;
         usb_state |= DISC_MOUNTED;
         usb_state &= ~COMMAND_ON_GOING;
@@ -1008,6 +1021,68 @@ bool getNextTOCEntry(toc_entry* toc) {
   snprintf(toc->name, toc->name_length, "%s", fileInfo.fname);
   toc->name[toc->name_length-1] = 0;
   return true;
+}
+
+void requestOpenFile(char* name, uint16_t name_length) {
+  uint16_t length = name_length + strlen(curPath) + 1;
+  if (curFilePath != NULL) free(curFilePath);
+  curFilePath = malloc(length);
+  snprintf(&curFilePath[0], length, "%s\\%s", curPath, name);
+  fileCmdRequired = OPEN;
+}
+
+void requestWriteFile(uint8_t* buf, uint16_t length) {
+  curBuf = buf;
+  curBufLength = length;
+  fileCmdRequired = WRITE;
+}
+
+void requestCloseFile() {
+  fileCmdRequired = CLOSE;
+}
+
+static void check_open_file() {
+  usb_state |= COMMAND_ON_GOING;
+  usb_result = false;
+  FILINFO fno;
+  BYTE mode = FA_WRITE;
+  if (f_stat(curFilePath, &fno) != FR_OK) {
+    LOG_SATA("File %s does not exist, create it\n", curFilePath);
+    mode |= FA_CREATE_NEW;
+  }
+  usb_result = (f_open(&curWriteFile, curFilePath, mode) == FR_OK);
+  usb_state &= ~COMMAND_ON_GOING;
+}
+
+static void check_write_file() {
+  usb_state |= COMMAND_ON_GOING;
+  uint nb_write;
+  usb_result =(f_write(&curWriteFile, curBuf, curBufLength, &nb_write) == FR_OK);
+  usb_state &= ~COMMAND_ON_GOING;
+}
+
+static void check_close_file() {
+  usb_state |= COMMAND_ON_GOING;
+  f_sync(&curWriteFile);
+  f_close(&curWriteFile);
+  usb_state &= ~COMMAND_ON_GOING;
+}
+
+static void check_file() {
+  switch(fileCmdRequired) {
+    case OPEN:
+      check_open_file();
+    break;
+    case WRITE:
+      check_write_file();
+    break;
+    case CLOSE:
+      check_write_file();
+    break;
+    default:
+    break;
+  }
+  fileCmdRequired = DONE;
 }
 
 //Need a umount callback

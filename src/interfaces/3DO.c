@@ -26,6 +26,7 @@ extern bool readBlock(uint32_t start, uint16_t nb_block, uint16_t block_size, ui
 extern bool readSubQChannel(uint8_t *buffer);
 extern bool USBDriveEject(bool eject, bool *interrupt);
 extern bool block_is_ready();
+extern bool cmd_is_ready(bool *success);
 extern bool isAudioBlock(uint32_t start);
 
 extern void USB_reset(void);
@@ -67,8 +68,8 @@ typedef enum{
   READ_FILE_BYTE = 0xE3,
   WRITE_FILE_BYTE = 0xE4,
   CLOSE_FILE = 0xE5,
-  WRITE_FILE_OFFSET = 0xE6,
-  READ_FILE_OFFSET = 0xE7,
+  WRITE_BUFFER_OFFSET = 0xE6,
+  READ_BUFFER_OFFSET = 0xE7,
 
   UPDATE_ODE = 0xF0,
 }CD_request_t;
@@ -379,6 +380,7 @@ bool sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
 }
 
 static uint8_t TOC[2048] = {0};
+static uint8_t FILE_BUFFER[2048] = {0};
 
 static void handleTocChange(int index) {
   toc_entry toc;
@@ -1045,10 +1047,22 @@ what's your reply to 0x83?
       for (int i=0; i<6; i++) {
         data_in[i] = GET_BUS(get3doData());
       }
-      LOG_SATA("OPEN_FILE\n");
-      buffer[index++] = OPEN_FILE;
-      buffer[index++] = 0; //Always report a failure
-      buffer[index++] = status;
+      {
+        bool write = (data_in[5]!=0);
+        bool success = false;
+        if ((data_in[0]&0xFF) != 0) {
+          uint32_t toc_id = ((data_in[1]&0xFF)<<24)|((data_in[2]&0xFF)<<16)|((data_in[3]&0xFF)<<8)|((data_in[4]&0xFF)<<0);
+          LOG_SATA("OPEN_FILE TOC_ID %x, W/R %d\n", toc_id, write);
+        } else {
+          uint16_t name_length = ((data_in[1]&0xFF)<<8)|((data_in[2]&0xFF)<<0);
+          LOG_SATA("OPEN_FILE NAME %d %s, W/R %d\n", name_length, &FILE_BUFFER[0], write);
+          requestOpenFile(&FILE_BUFFER[0], name_length);
+          while (!cmd_is_ready(&success));
+        }
+        buffer[index++] = OPEN_FILE;
+        buffer[index++] = success; //Always report a failure
+        buffer[index++] = status;
+      }
       sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
     case SEEK_FILE:
@@ -1074,11 +1088,16 @@ what's your reply to 0x83?
     case WRITE_FILE_BYTE:
     for (int i=0; i<6; i++) {
       data_in[i] = GET_BUS(get3doData());
+    }{
+      bool success = false;
+      uint16_t length = ((data_in[0]&0xFF)<<8)|((data_in[1]&0xFF)<<0);
+      LOG_SATA("WRITE_FILE_BYTE %x\n", length);
+      requestWriteFile(&FILE_BUFFER[0], length);
+      while (!cmd_is_ready(&success));
+      buffer[index++] = WRITE_FILE_BYTE;
+      buffer[index++] = success?data_in[0]:0;
+      buffer[index++] = success?data_in[1]:0;
     }
-    LOG_SATA("WRITE_FILE_BYTE\n");
-    buffer[index++] = WRITE_FILE_BYTE;
-    buffer[index++] = 0; //Always report a failure
-    buffer[index++] = 0; //Always report a failure
     buffer[index++] = status;
     sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
@@ -1087,25 +1106,33 @@ what's your reply to 0x83?
       data_in[i] = GET_BUS(get3doData());
     }
     LOG_SATA("CLOSE_FILE\n");
+    requestCloseFile();
+    while (!cmd_is_ready(NULL));
     buffer[index++] = CLOSE_FILE;
     buffer[index++] = status;
     sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
-    case WRITE_FILE_OFFSET:
+    case WRITE_BUFFER_OFFSET:
     for (int i=0; i<6; i++) {
       data_in[i] = GET_BUS(get3doData());
     }
-    LOG_SATA("WRITE_FILE_OFFSET\n");
-    buffer[index++] = WRITE_FILE_OFFSET;
+    {
+      uint16_t offset = ((data_in[0]&0xFF)<<8)|((data_in[1]&0xFF)<<0)<<2;
+      LOG_SATA("WRITE_BUFFER_OFFSET 0x%x\n", offset);
+      for (int i=0; i<4; i++) {
+        FILE_BUFFER[offset+i] = data_in[2+i];
+      }
+    }
+    buffer[index++] = WRITE_BUFFER_OFFSET;
     buffer[index++] = status;
     sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
-    case READ_FILE_OFFSET:
+    case READ_BUFFER_OFFSET:
     for (int i=0; i<6; i++) {
       data_in[i] = GET_BUS(get3doData());
     }
-    LOG_SATA("READ_FILE_OFFSET\n");
-    buffer[index++] = READ_FILE_OFFSET;
+    LOG_SATA("READ_BUFFER_OFFSET\n");
+    buffer[index++] = READ_BUFFER_OFFSET;
     buffer[index++] = status;
     sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
