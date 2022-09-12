@@ -28,7 +28,7 @@ extern void addToPlaylist(int entry, bool *valid, bool *added);
 
 extern bool seekTocTo(int index);
 
-extern void requestOpenFile(char* name, uint16_t name_length);
+extern void requestOpenFile(char* name, uint16_t name_length, bool write);
 extern void requestWriteFile(uint8_t* buf, uint16_t length);
 extern void requestReadFile(uint8_t* buf, uint16_t length);
 extern void requestCloseFile();

@@ -1056,7 +1056,7 @@ what's your reply to 0x83?
         } else {
           uint16_t name_length = ((data_in[1]&0xFF)<<8)|((data_in[2]&0xFF)<<0);
           LOG_SATA("OPEN_FILE NAME %d %s, W/R %d\n", name_length, &FILE_BUFFER[0], write);
-          requestOpenFile(&FILE_BUFFER[0], name_length);
+          requestOpenFile(&FILE_BUFFER[0], name_length, write);
           while (!cmd_is_ready(&success));
         }
         buffer[index++] = OPEN_FILE;
@@ -1138,9 +1138,7 @@ what's your reply to 0x83?
       data_in[i] = GET_BUS(get3doData());
     }
     LOG_SATA("READ_BUFFER_OFFSET\n");
-    buffer[index++] = READ_BUFFER_OFFSET;
-    buffer[index++] = status;
-    sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+    sendRawData(READ_BUFFER_OFFSET, &FILE_BUFFER[0], 2048);
       break;
     case UPDATE_ODE:
     for (int i=0; i<6; i++) {

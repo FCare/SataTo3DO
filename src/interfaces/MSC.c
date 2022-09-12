@@ -21,6 +21,7 @@ char *curPath = NULL;
 
 FIL curDataFile;
 char *curFilePath = NULL;
+static bool curFileMode = false;
 
 typedef enum {
   BOOT_ISO = 1,
@@ -1022,10 +1023,11 @@ bool getNextTOCEntry(toc_entry* toc) {
   return true;
 }
 
-void requestOpenFile(char* name, uint16_t name_length) {
+void requestOpenFile(char* name, uint16_t name_length, bool write) {
   uint16_t length = name_length + strlen(curPath) + 1;
   if (curFilePath != NULL) free(curFilePath);
   curFilePath = malloc(length);
+  curFileMode = write;
   snprintf(&curFilePath[0], length, "%s\\%s", curPath, name);
   fileCmdRequired = OPEN;
 }
@@ -1049,13 +1051,7 @@ void requestCloseFile() {
 static void check_open_file() {
   usb_state |= COMMAND_ON_GOING;
   usb_result = false;
-  FILINFO fno;
-  BYTE mode = FA_WRITE;
-  if (f_stat(curFilePath, &fno) != FR_OK) {
-    LOG_SATA("File %s does not exist, create it\n", curFilePath);
-    mode |= FA_CREATE_NEW;
-  }
-  usb_result = (f_open(&curDataFile, curFilePath, mode) == FR_OK);
+  usb_result = (f_open(&curDataFile, curFilePath,  FA_WRITE| FA_READ |FA_OPEN_ALWAYS) == FR_OK);
   usb_state &= ~COMMAND_ON_GOING;
 }
 
@@ -1069,7 +1065,9 @@ static void check_write_file() {
 static void check_read_file() {
   usb_state |= COMMAND_ON_GOING;
   uint nb_read;
-  usb_result =(f_read(&curDataFile, curBuf, curBufLength, &nb_read) == FR_OK);
+  FRESULT res = f_read(&curDataFile, curBuf, curBufLength, &nb_read);
+  usb_result = (res == FR_OK);
+  if (!usb_result) printf("Issue while reading %d (%d) => %x\n", curBufLength, nb_read,res);
   usb_state &= ~COMMAND_ON_GOING;
 }
 
