@@ -256,8 +256,7 @@ void tuh_msc_umount_cb(uint8_t dev_addr)
 {
   (void) dev_addr;
   LOG_SATA("A USB MassStorage device is unmounted\r\n");
-  set3doCDReady(false);
-  set3doDriveMounted(false);
+  mediaInterrupt();
   inquiry_resp.peripheral_device_type = 0x1F;
   usb_state &= ~DISC_MOUNTED;
 }

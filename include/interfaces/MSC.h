@@ -33,4 +33,8 @@ extern void requestWriteFile(uint8_t* buf, uint16_t length);
 extern void requestReadFile(uint8_t* buf, uint16_t length);
 extern void requestCloseFile();
 
+extern void requestBootImage();
+extern void waitForLoad();
+
+
 #endif

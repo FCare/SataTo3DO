@@ -211,22 +211,17 @@ void set3doCDReady(bool on) {
         break;
     }
   }
-  // if (on && (currentDisc.format <= 0xF0)) status |= DISC_RDY;
-  // else status &= ~DISC_RDY;
+  if (on) {
+    status = TRAY_IN | DISC_RDY | DISC_PRESENT | SPINNING;
+    errorCode = 0;
+    status &= ~CHECK_ERROR;
+  }
+
 }
 
 void set3doDriveMounted(bool on) {
-  if (on) {
-    status |= DISC_PRESENT | SPINNING;
-  } else {
-    status &= ~DISC_PRESENT & ~SPINNING;
-  }
   if (currentDisc.mounted != on) {
     currentDisc.mounted = on;
-    if (!on) {
-      errorCode = DISC_REMOVED;
-      status |= CHECK_ERROR;
-    }
   }
 }
 
@@ -482,7 +477,7 @@ void sendData(int startlba, int nb_block, bool trace) {
     int current = id;
     int data_idx = 0;
     if (trace) a= get_absolute_time();
-    if (!currentDisc.mounted) {
+    if (!(status & DISC_PRESENT)) {
       return;
     }
 
@@ -525,7 +520,6 @@ void sendRawData(int command, uint8_t *buffer, int length) {
 }
 
 static bool hasMediaInterrupt = false;
-static bool hadMediaInterrupt = false;
 void mediaInterrupt(void) {
   hasMediaInterrupt = true;
   // canHandleReset = false;
@@ -533,13 +527,12 @@ void mediaInterrupt(void) {
 }
 void handleMediaInterrupt() {
   if (!hasMediaInterrupt) return;
-  if (currentDisc.mounted && !canHandleReset) {
+  if ((status & DISC_PRESENT) && !canHandleReset) {
     gpio_put(LED, ledState);
     ledState = !ledState;
     return;
   }
   hasMediaInterrupt = false;
-  hadMediaInterrupt = true;
   // gpio_set_dir(CDRST, true);
   // gpio_put(CDRST, 0);
   // pio_sm_set_enabled(pio0, sm_read, false);
@@ -551,10 +544,15 @@ void handleMediaInterrupt() {
   // gpio_put(CDMDCHG, 0); //Under reset
   // sleep_ms(10);
   gpio_put(CDMDCHG, 0); //Under reset
+  status &= ~DISC_PRESENT & ~SPINNING;
+  status |= CHECK_ERROR;
+  errorCode = DISC_REMOVED;
   sleep_ms(10);
   while (!pio_sm_is_rx_fifo_empty(pio0, sm_read)) {
     pio_sm_get(pio0, sm_read);
   }
+  requestBootImage();
+  waitForLoad();
   gpio_put(CDMDCHG, 1); //Under reset
   // pio_sm_set_enabled(pio0, sm_read, false);
   // errorCode |= POWER_OR_RESET_OCCURED;
@@ -635,11 +633,11 @@ void handleCommand(uint32_t data) {
       for (int i=0; i<6; i++) {
         data_in[i] = get3doData();
       }
-      LOG_SATA("DATA_PATH_CHECK\n");
+      LOG_SATA("DATA_PATH_CHECK %d\n", (status & DISC_PRESENT));
       buffer[index++] = DATA_PATH_CHECK;
-      if (!currentDisc.mounted) {
-        buffer[index++] = 0xA5; //This means ok
-        buffer[index++] = 0xA5; //This means ok. Not the case when no disc
+      if (!(status & DISC_PRESENT)) {
+        buffer[index++] = 0xA5;
+        buffer[index++] = 0xA5;
       } else {
         buffer[index++] = 0xAA; //This means ok
         buffer[index++] = 0x55; //This means ok. Not the case when no disc
@@ -649,7 +647,7 @@ void handleCommand(uint32_t data) {
       canHandleReset = true;
       break;
     case SPIN_UP:
-      if (currentDisc.mounted) {
+      if (status & DISC_PRESENT) {
         for (int i=0; i<6; i++) {
           data_in[i] = get3doData();
         }
@@ -671,7 +669,7 @@ void handleCommand(uint32_t data) {
       }
       break;
     case READ_DATA:
-      if (currentDisc.mounted) {
+      if (status & DISC_PRESENT) {
         for (int i=0; i<6; i++) {
           data_in[i] = GET_BUS(get3doData());
         }
@@ -706,14 +704,14 @@ void handleCommand(uint32_t data) {
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
         break;
     case READ_DISC_INFO:
-      if (currentDisc.mounted) {
+      if (status & DISC_PRESENT) {
         for (int i=0; i<6; i++) {
           data_in[i] = get3doData();
         }
         LOG_SATA("DISC_INFO\n");
         buffer[index++] = READ_DISC_INFO;
         // LBA = (((M*60)+S)*75+F)-150
-        if (currentDisc.mounted) {
+        if (status & DISC_PRESENT) {
           buffer[index++] = currentDisc.format;
           buffer[index++] = currentDisc.first_track;
           buffer[index++] = currentDisc.last_track;
@@ -732,11 +730,11 @@ void handleCommand(uint32_t data) {
         }
         buffer[index++] = status;
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
-        LOG_SATA("%d %x %d %d %d:%d:%d\n", currentDisc.mounted, buffer[1], buffer[2],buffer[3],buffer[4],buffer[5],buffer[6]);
+        LOG_SATA("%d %x %d %d %d:%d:%d\n", (status & DISC_PRESENT), buffer[1], buffer[2],buffer[3],buffer[4],buffer[5],buffer[6]);
       }
       break;
     case READ_TOC:
-      if (currentDisc.mounted) {
+      if (status & DISC_PRESENT) {
         for (int i=0; i<6; i++) {
           data_in[i] = GET_BUS(get3doData());
         }
@@ -756,7 +754,7 @@ void handleCommand(uint32_t data) {
       }
       break;
     case READ_SESSION:
-      if (currentDisc.mounted) {
+      if (status & DISC_PRESENT) {
         for (int i=0; i<6; i++) {
           data_in[i] = get3doData();
         }
@@ -784,7 +782,7 @@ void handleCommand(uint32_t data) {
       }
     break;
     case READ_CAPACITY:
-      if (currentDisc.mounted) {
+      if (status & DISC_PRESENT) {
         for (int i=0; i<6; i++) {
           data_in[i] = get3doData();
         }
@@ -882,7 +880,7 @@ what's your reply to 0x83?
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
         break;
     case READ_SUB_Q:
-    if (currentDisc.mounted) {
+    if (status & DISC_PRESENT) {
         for (int i=0; i<6; i++) {
           data_in[i] = GET_BUS(get3doData());
         }
@@ -1207,20 +1205,14 @@ void core1_entry() {
         reset_occured = true;
         wait_out_of_reset();
         set3doDriveMounted(false);
-        status = TRAY_IN | CHECK_ERROR | DISC_RDY;
+        status |= CHECK_ERROR;
         errorCode = POWER_OR_RESET_OCCURED;
         restartReadPio();
       }
       if (gpio_get(CDEN)) {
         LOG_SATA("CD is not enabled\n");
         while(gpio_get(CDEN));
-        LOG_SATA("CD is enabled now %d\n", hadMediaInterrupt);
-        if (hadMediaInterrupt) {
-          //on first CD enable after a media interrupt
-          canHandleReset = false;
-          requestLoad = 1;
-          hadMediaInterrupt = false;
-        }
+        LOG_SATA("CD is enabled now\n");
       }
 
       bool ejectCurrent = gpio_get(EJECT);

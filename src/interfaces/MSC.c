@@ -59,7 +59,7 @@ extern volatile bool usb_result;
 
 #if CFG_TUH_MSC
 static bool check_eject();
-static bool check_load();
+static void check_load();
 static void check_block();
 static void check_file();
 static void check_subq();
@@ -158,11 +158,20 @@ static bool check_eject() {
   return false;
 }
 
-static bool check_load() {
-  if (requestLoad!=-1) {
+
+void requestBootImage() {
+  requestLoad = true;
+}
+
+void waitForLoad() {
+  while(requestLoad);
+}
+
+static void check_load() {
+  if (requestLoad) {
     //Execute right now
     handleBootImage();
-    requestLoad = -1;
+    requestLoad=false;
     return true;
   }
   return false;
@@ -893,7 +902,6 @@ bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
     LOG_SATA("Can not mount\n");
     return false;
   }
-  handleBootImage();
   mediaInterrupt();
 }
 
