@@ -19,8 +19,7 @@ typedef struct dir_s{
 dir_t *curDir = NULL;
 char *curPath = NULL;
 
-FIL curReadFile;
-FIL curWriteFile;
+FIL curDataFile;
 char *curFilePath = NULL;
 
 typedef enum {
@@ -1037,6 +1036,12 @@ void requestWriteFile(uint8_t* buf, uint16_t length) {
   fileCmdRequired = WRITE;
 }
 
+void requestReadFile(uint8_t* buf, uint16_t length) {
+  curBuf = buf;
+  curBufLength = length;
+  fileCmdRequired = READ;
+}
+
 void requestCloseFile() {
   fileCmdRequired = CLOSE;
 }
@@ -1050,21 +1055,29 @@ static void check_open_file() {
     LOG_SATA("File %s does not exist, create it\n", curFilePath);
     mode |= FA_CREATE_NEW;
   }
-  usb_result = (f_open(&curWriteFile, curFilePath, mode) == FR_OK);
+  usb_result = (f_open(&curDataFile, curFilePath, mode) == FR_OK);
   usb_state &= ~COMMAND_ON_GOING;
 }
 
 static void check_write_file() {
   usb_state |= COMMAND_ON_GOING;
   uint nb_write;
-  usb_result =(f_write(&curWriteFile, curBuf, curBufLength, &nb_write) == FR_OK);
+  usb_result =(f_write(&curDataFile, curBuf, curBufLength, &nb_write) == FR_OK);
   usb_state &= ~COMMAND_ON_GOING;
 }
 
+static void check_read_file() {
+  usb_state |= COMMAND_ON_GOING;
+  uint nb_read;
+  usb_result =(f_read(&curDataFile, curBuf, curBufLength, &nb_read) == FR_OK);
+  usb_state &= ~COMMAND_ON_GOING;
+}
+
+
 static void check_close_file() {
   usb_state |= COMMAND_ON_GOING;
-  f_sync(&curWriteFile);
-  f_close(&curWriteFile);
+  f_sync(&curDataFile);
+  f_close(&curDataFile);
   usb_state &= ~COMMAND_ON_GOING;
 }
 
@@ -1075,6 +1088,9 @@ static void check_file() {
     break;
     case WRITE:
       check_write_file();
+    break;
+    case READ:
+      check_read_file();
     break;
     case CLOSE:
       check_close_file();

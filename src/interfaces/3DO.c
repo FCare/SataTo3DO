@@ -1078,12 +1078,18 @@ what's your reply to 0x83?
       for (int i=0; i<6; i++) {
         data_in[i] = GET_BUS(get3doData());
       }
-      LOG_SATA("READ_FILE_BYTE\n");
-      buffer[index++] = READ_FILE_BYTE;
-      buffer[index++] = 0; //Always report a failure
-      buffer[index++] = 0; //Always report a failure
+      {
+        bool success = false;
+        uint16_t length = ((data_in[0]&0xFF)<<8)|((data_in[1]&0xFF)<<0);
+        LOG_SATA("READ_FILE_BYTE %x\n", length);
+        requestReadFile(&FILE_BUFFER[0], length);
+        while (!cmd_is_ready(&success));
+        buffer[index++] = READ_FILE_BYTE;
+        buffer[index++] = success?data_in[0]:0;
+        buffer[index++] = success?data_in[1]:0;
+      }
       buffer[index++] = status;
-    sendAnswer(buffer, index, CHAN_WRITE_STATUS);
+      sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
     case WRITE_FILE_BYTE:
     for (int i=0; i<6; i++) {

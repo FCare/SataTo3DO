@@ -30,6 +30,7 @@ extern bool seekTocTo(int index);
 
 extern void requestOpenFile(char* name, uint16_t name_length);
 extern void requestWriteFile(uint8_t* buf, uint16_t length);
+extern void requestReadFile(uint8_t* buf, uint16_t length);
 extern void requestCloseFile();
 
 #endif

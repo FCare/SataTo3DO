@@ -16,6 +16,7 @@ typedef enum {
 typedef enum {
   DONE = 0x0,
   OPEN,
+  READ,
   WRITE,
   CLOSE
 } fileCmd_s;
