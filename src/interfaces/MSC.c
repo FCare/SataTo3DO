@@ -172,9 +172,7 @@ static void check_load() {
     //Execute right now
     handleBootImage();
     requestLoad=false;
-    return true;
   }
-  return false;
 }
 
 

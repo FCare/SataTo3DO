@@ -69,7 +69,7 @@ typedef enum{
   WRITE_FILE_BYTE = 0xE4,
   CLOSE_FILE = 0xE5,
   WRITE_BUFFER_OFFSET = 0xE6,
-  READ_BUFFER_OFFSET = 0xE7,
+  READ_BUFFER = 0xE7,
 
   UPDATE_ODE = 0xF0,
 }CD_request_t;
@@ -375,7 +375,7 @@ bool sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
 }
 
 static uint8_t TOC[2048] = {0};
-static uint8_t FILE_BUFFER[2048] = {0};
+uint8_t FILE_BUFFER[2048] = {0};
 
 static void handleTocChange(int index) {
   toc_entry toc;
@@ -1131,12 +1131,12 @@ what's your reply to 0x83?
     buffer[index++] = status;
     sendAnswer(buffer, index, CHAN_WRITE_STATUS);
       break;
-    case READ_BUFFER_OFFSET:
+    case READ_BUFFER:
     for (int i=0; i<6; i++) {
       data_in[i] = GET_BUS(get3doData());
     }
-    LOG_SATA("READ_BUFFER_OFFSET\n");
-    sendRawData(READ_BUFFER_OFFSET, &FILE_BUFFER[0], 2048);
+    LOG_SATA("READ_BUFFER\n");
+    sendRawData(READ_BUFFER, &FILE_BUFFER[0], 2048);
       break;
     case UPDATE_ODE:
     for (int i=0; i<6; i++) {
