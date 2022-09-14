@@ -1121,7 +1121,7 @@ what's your reply to 0x83?
       data_in[i] = GET_BUS(get3doData());
     }
     {
-      uint16_t offset = ((data_in[0]&0xFF)<<8)|((data_in[1]&0xFF)<<0)<<2;
+      uint16_t offset = (((data_in[0]&0xFF)<<8)|((data_in[1]&0xFF)<<0))<<2;
       LOG_SATA("WRITE_BUFFER_OFFSET 0x%x\n", offset);
       for (int i=0; i<4; i++) {
         FILE_BUFFER[offset+i] = data_in[2+i];

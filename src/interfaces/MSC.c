@@ -1065,6 +1065,7 @@ static void check_write_file() {
   usb_state |= COMMAND_ON_GOING;
   uint nb_write;
   usb_result =(f_write(&curDataFile, curBuf, curBufLength, &nb_write) == FR_OK);
+  usb_result =(f_sync(&curDataFile) == FR_OK);
   usb_state &= ~COMMAND_ON_GOING;
 }
 
@@ -1080,8 +1081,7 @@ static void check_read_file() {
 
 static void check_close_file() {
   usb_state |= COMMAND_ON_GOING;
-  f_sync(&curDataFile);
-  f_close(&curDataFile);
+  usb_result = (f_close(&curDataFile) == FR_OK);
   usb_state &= ~COMMAND_ON_GOING;
 }
 
@@ -1089,20 +1089,23 @@ static void check_file() {
   switch(fileCmdRequired) {
     case OPEN:
       check_open_file();
+      fileCmdRequired = DONE;
     break;
     case WRITE:
       check_write_file();
+      fileCmdRequired = DONE;
     break;
     case READ:
       check_read_file();
+      fileCmdRequired = DONE;
     break;
     case CLOSE:
       check_close_file();
+      fileCmdRequired = DONE;
     break;
     default:
     break;
   }
-  fileCmdRequired = DONE;
 }
 
 //Need a umount callback
