@@ -12,6 +12,7 @@ static bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_
 static void check_mount();
 
 void USB_Host_init() {
+    currentDisc.dev_addr = 0xFF;
     SET_USB_STEP(DETACHED);
     SET_USB_PERIPH_TYPE(UNKNOWN_TYPE);
 #ifdef USE_TRACE
@@ -139,14 +140,14 @@ static bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_
   return true;
 }
 
-
-void tuh_mount_cb (uint8_t dev_addr) {
+void tuh_msc_enumerate_cb (uint8_t dev_addr) {
   uint8_t buffer_void[18];
   TU_LOG1("Usb device Mounted %x\n", dev_addr);
-  uint8_t const lun = 0;
-  SET_USB_STEP(ATTACHED);
   currentDisc.dev_addr = dev_addr;
+}
 
+void tuh_mount_cb(uint8_t dev_addr) {
+  if (currentDisc.dev_addr != 0xFF) SET_USB_STEP(ATTACHED);
 }
 
 bool read_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
@@ -242,6 +243,7 @@ void tuh_msc_umount_cb(uint8_t dev_addr)
   LOG_SATA("A USB MassStorage device is unmounted\r\n");
   set3doCDReady(false);
   set3doDriveMounted(false);
+  currentDisc.dev_addr = 0xFF;
   SET_USB_STEP(DETACHED);
   SET_USB_PERIPH_TYPE(UNKNOWN_TYPE);
   mediaInterrupt();

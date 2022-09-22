@@ -851,8 +851,8 @@ void loadBootIso() {
   FILINFO fileInfo;
   LOG_SATA("Load boot.iso\n");
   curDir = getNewDir();
-  curPath = (char *) malloc(3);
-  sprintf(curPath, "0:");
+  curPath = (char *) malloc(5);
+  snprintf(curPath, 5, "%d:", currentDisc.dev_addr-1);
   res = f_findfirst(&curDir->dir, &fileInfo, curPath, "boot.iso");
   if ((res != FR_OK) || (strlen(fileInfo.fname) == 0)) {
     //report error. Boot iso is not found
@@ -886,9 +886,11 @@ static void handleBootImage(void) {
 
 bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   FRESULT result;
-  LOG_SATA("MSC_Inquiry\n");
+  LOG_SATA("MSC_Inquiry %d\n", dev_addr);
   if (tuh_msc_get_block_size(dev_addr, cbw->lun) == 0) return false;
-  result = f_mount(&DiskFATState, "" , 1);
+  char path[7];
+  snprintf(path, 7, "%d://", dev_addr-1);
+  result = f_mount(&DiskFATState, path , 1);
   if (result!=FR_OK) {
     LOG_SATA("Can not mount\n");
     return false;
