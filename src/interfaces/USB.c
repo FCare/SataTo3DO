@@ -113,12 +113,12 @@ static bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_
 {
   if (csw->status != 0)
   {
-    printf("Inquiry failed %x\r\n", csw->status);
+    TU_LOG1("Inquiry failed %x\r\n", csw->status);
     SET_USB_STEP(ATTACHED);
     return false;
   }
   // Print out Vendor ID, Product ID and Rev
-  printf("%.8s %.16s rev %.4s Type 0x%x Lun %d\r\n", inquiry_resp.vendor_id, inquiry_resp.product_id, inquiry_resp.product_rev, inquiry_resp.peripheral_device_type, cbw->lun);
+  TU_LOG1("%.8s %.16s rev %.4s Type 0x%x Lun %d\r\n", inquiry_resp.vendor_id, inquiry_resp.product_id, inquiry_resp.product_rev, inquiry_resp.peripheral_device_type, cbw->lun);
 
   currentDisc.dev_addr = dev_addr;
 
@@ -142,7 +142,7 @@ static bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_
 
 void tuh_mount_cb (uint8_t dev_addr) {
   uint8_t buffer_void[18];
-  printf("Usb device Mounted %x\n", dev_addr);
+  TU_LOG1("Usb device Mounted %x\n", dev_addr);
   uint8_t const lun = 0;
   SET_USB_STEP(ATTACHED);
   currentDisc.dev_addr = dev_addr;
@@ -226,7 +226,7 @@ bool readBlock(uint32_t start, uint16_t nb_block, uint16_t block_size, uint8_t *
 
 void tuh_msc_enumerated_cb(uint8_t dev_addr)
 {
-  printf("##### enumerated ######\n");
+  TU_LOG1("##### enumerated ######\n");
 }
 
 void tuh_msc_mount_cb(uint8_t dev_addr)
