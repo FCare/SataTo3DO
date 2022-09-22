@@ -12,24 +12,23 @@ static bool check_subq();
 
 bool CDROM_Host_loop()
 {
-  // tinyusb host task
 #if CFG_TUH_MSC
-  if(usb_state & ENUMERATED) {
-    if (!(usb_state & COMMAND_ON_GOING)) {
-      if (!check_eject()) {
-        if (usb_state & DISC_MOUNTED) {
-          check_speed();
-          check_block();
-          check_subq();
-          return true;
-        } else {
-          return false;
-        }
-      }
+  if (!IS_USB_CMD_ONGOING()) {
+    switch(GET_USB_STEP()) {
+      case EJECTING:
+        check_eject();
+      case MOUNTED:
+        check_speed();
+        check_block();
+        check_subq();
+        return true;
+        break;
+      default:
+        return false;
     }
   }
-  return true;
 #endif
+  return false;
 }
 
 
@@ -47,44 +46,33 @@ uint8_t readBuffer[20480];
 extern volatile bool is_audio;
 extern volatile bool has_subQ;
 
-static bool retryEject = false;
-
 static bool command_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   if (csw->status != MSC_CSW_STATUS_PASSED) {
     if (currentDisc.mounted) {
       set3doDriveError();
     }
-    requestEject = (retryEject)?1:0;
   }
-  usb_state &= ~COMMAND_ON_GOING;
+  CLEAR_USB_CMD_ONGOING();
 }
 
-bool CDROM_ExecuteEject(bool eject) {
-  usb_state |= COMMAND_ON_GOING;
-  retryEject = eject;
-  if ( !tuh_msc_start_stop(currentDisc.dev_addr, currentDisc.lun, eject, true, command_complete_cb)) {
+bool CDROM_ExecuteEject() {
+  SET_USB_CMD_ONGOING();
+  if ( !tuh_msc_start_stop(currentDisc.dev_addr, currentDisc.lun, false, true, command_complete_cb)) {
     LOG_SATA("Got error while eject command\n");
   }
   else {
-    if (!eject) {
-      set3doCDReady(false);
-      set3doDriveMounted(false);
-      usb_state &= ~DISC_MOUNTED;
-    }
+    set3doCDReady(false);
+    set3doDriveMounted(false);
     return true;
   }
   return false;
 }
 
 static bool check_eject() {
-  if (requestEject!=-1) {
-    //Execute right now
-    LOG_SATA("Eject %d\n", requestEject);
-    if (CDROM_ExecuteEject(requestEject != 0))
-      requestEject = -1;
-    return true;
-  }
-  return false;
+  //Execute right now
+  LOG_SATA("Eject\n");
+  if (CDROM_ExecuteEject()) SET_USB_STEP(ATTACHED);
+  return true;
 }
 
 extern uint32_t start_Block;
@@ -99,7 +87,7 @@ static uint16_t CDSpeed;
 
 static void check_block() {
   if (blockRequired) {
-    usb_state |= COMMAND_ON_GOING;
+    SET_USB_CMD_ONGOING();
     blockRequired = false;
     if (!is_audio) {
       if ( !tuh_msc_read10(currentDisc.dev_addr, currentDisc.lun, buffer_Block, start_Block, nb_block_Block, read_complete_cb)) {
@@ -117,7 +105,7 @@ static void check_block() {
 
 static bool check_subq() {
   if (subqRequired) {
-    usb_state |= COMMAND_ON_GOING;
+    SET_USB_CMD_ONGOING();
     subqRequired = false;
     if (!tuh_msc_read_sub_channel(currentDisc.dev_addr, currentDisc.lun, buffer_subq, read_complete_cb)) {
       LOG_SATA("Got error with sub Channel read\n");
@@ -129,7 +117,7 @@ static bool check_subq() {
 
 static void check_speed() {
   if (speedChange) {
-    usb_state |= COMMAND_ON_GOING;
+    SET_USB_CMD_ONGOING();
     speedChange = false;
     if ( !tuh_msc_set_speed(currentDisc.dev_addr, currentDisc.lun, CDSpeed, 0xFFFF, read_complete_cb)) {
       LOG_SATA("Got error with block read\n");
@@ -145,15 +133,16 @@ static bool setCDSpeed(uint16_t speed) {
 }
 
 static bool read_header_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
-  usb_state &= ~COMMAND_ON_GOING;
+  CLEAR_USB_CMD_ONGOING();
   if (readBuffer[0] == 0x2) {
     /* 00h - audio; 01h - Mode 1 (games) - Mode 2 (CD-XA photoCD) */
     //Photo CD shall have an audio track. CD-i are Mode 2 but without audio.
     currentDisc.format = 0x20; //Only CD-ROM, CD-DA and CD-XA are supported
   }
-  usb_state |= DISC_MOUNTED;
+  if (GET_USB_STEP() < MOUNTED) SET_USB_STEP(MOUNTED);
   set3doCDReady(true);
   set3doDriveMounted(true);
+  mediaInterrupt();
   return true;
 }
 
@@ -210,7 +199,7 @@ static bool read_toc_light_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, m
 }
 
 bool CDROM_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
-
+  if (tuh_msc_get_block_size(dev_addr, cbw->lun) == 0) return false;
   // Get capacity of device
   currentDisc.hasOnlyAudio = true;
   currentDisc.nb_block = tuh_msc_get_block_count(dev_addr, cbw->lun);
@@ -228,7 +217,7 @@ bool CDROM_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw)
 
   LOG_SATA("Disk Size: %lu MB\r\n", currentDisc.nb_block / ((1024*1024)/currentDisc.block_size));
   LOG_SATA("Block Count = %lu, Block Size: %lu\r\n", currentDisc.nb_block, currentDisc.block_size);
-  LOG_SATA("Disc duration is %2d:%2d:%2d\n", currentDisc.msf[0], currentDisc.msf[1], currentDisc.msf[2]);
+  LOG_SATA("Disc duration is %02d:%02d:%02d\n", currentDisc.msf[0], currentDisc.msf[1], currentDisc.msf[2]);
 
   if (!tuh_msc_read_toc(dev_addr, cbw->lun, readBuffer, 1, 0, 0, read_toc_light_complete_cb)) {
       LOG_SATA("Got error with toc read\n");

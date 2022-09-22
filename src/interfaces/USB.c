@@ -7,12 +7,13 @@
 
 uint8_t usb_state = 0;
 
+static scsi_inquiry_resp_t inquiry_resp;
+static bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw);
 static void check_mount();
 
-static scsi_inquiry_resp_t inquiry_resp;
-
 void USB_Host_init() {
-    inquiry_resp.peripheral_device_type = 0x1F;
+    SET_USB_STEP(DETACHED);
+    SET_USB_PERIPH_TYPE(UNKNOWN_TYPE);
 #ifdef USE_TRACE
     stdio_init_all();
 #endif
@@ -22,20 +23,20 @@ void USB_Host_init() {
 static bool check_eject();
 
 static bool Default_Host_loop() {
-  #if CFG_TUH_MSC
-    if(usb_state & ENUMERATED) {
-      if (!(usb_state & COMMAND_ON_GOING)) {
-        if (!check_eject()) {
-          if (usb_state & DISC_MOUNTED) {
-            return true;
-          } else {
-            return false;
-          }
-        }
-      }
+#if CFG_TUH_MSC
+  if (!IS_USB_CMD_ONGOING()) {
+    switch(GET_USB_STEP()) {
+      case EJECTING:
+        check_eject();
+      case MOUNTED:
+        return true;
+        break;
+      default:
+        return false;
     }
-    return true;
-  #endif
+  }
+#endif
+  return false;
 }
 
 void USB_Host_loop()
@@ -43,18 +44,19 @@ void USB_Host_loop()
   // tinyusb host task
   bool ret = true;
   tuh_task();
-  if ((usb_state & PERIPH_TYPE) == CD_TYPE) {
-    ret = CDROM_Host_loop();
+  switch (GET_USB_PERIPH_TYPE()) {
+    case CD_TYPE:
+      ret = CDROM_Host_loop();
+      break;
+    case MSC_TYPE:
+      ret = MSC_Host_loop();
+      break;
+    default:
+      ret = Default_Host_loop();
   }
-
-  if ((usb_state & PERIPH_TYPE) == MSC_TYPE) {
-    ret = MSC_Host_loop();
-  }
-  else {
-    ret = Default_Host_loop();
-  }
-  if(!ret) {
-    check_mount();
+  if (!ret) {
+    if(GET_USB_STEP()==ATTACHED) tuh_msc_inquiry(currentDisc.dev_addr, 0, &inquiry_resp, inquiry_complete_cb);
+    if(GET_USB_STEP()==ENUMERATED) check_mount();
   }
 }
 
@@ -65,11 +67,8 @@ void USB_Host_loop()
 // MACRO TYPEDEF CONSTANT ENUM DECLARATION
 //--------------------------------------------------------------------+
 
-volatile int8_t requestEject = -1;
 volatile int8_t requestLoad = -1;
 cd_s currentDisc = {0};
-
-volatile bool inquiry_cb_flag;
 
 static bool startClose = true;
 
@@ -89,31 +88,65 @@ uint8_t *buffer_subq;
 fileCmd_s fileCmdRequired;
 
 static bool check_eject() {
-  if (requestEject!=-1) {
-    //Execute right now
-    LOG_SATA("Eject %d\n", requestEject);
-    if (CDROM_ExecuteEject(requestEject != 0))
-      requestEject = -1;
+  //Execute right now
+  LOG_SATA("Eject\n");
+  if (CDROM_ExecuteEject()) SET_USB_STEP(ATTACHED);
     return true;
-  }
-  return false;
 }
 
 void USB_reset(void) {
   LOG_SATA("reset usb\n");
-  usb_state = 0;
   startClose = false;
   tuh_msc_umount_cb(currentDisc.dev_addr);
   tusb_reset();
 }
 
 static void check_mount() {
-  if (!currentDisc.mounted) {
-    //Send a sense loop
-    uint8_t const lun = 0;
-    usb_state |= COMMAND_ON_GOING;
-    checkForMedia(currentDisc.dev_addr, lun);
+  //Send a sense loop
+  uint8_t const lun = 0;
+  SET_USB_CMD_ONGOING();
+  checkForMedia(currentDisc.dev_addr, lun);
+  CLEAR_USB_CMD_ONGOING();
+}
+
+static bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw)
+{
+  if (csw->status != 0)
+  {
+    printf("Inquiry failed %x\r\n", csw->status);
+    SET_USB_STEP(ATTACHED);
+    return false;
   }
+  // Print out Vendor ID, Product ID and Rev
+  printf("%.8s %.16s rev %.4s Type 0x%x Lun %d\r\n", inquiry_resp.vendor_id, inquiry_resp.product_id, inquiry_resp.product_rev, inquiry_resp.peripheral_device_type, cbw->lun);
+
+  currentDisc.dev_addr = dev_addr;
+
+  CLEAR_USB_CMD_ONGOING();
+  if (GET_USB_STEP() < ENUMERATED)
+    SET_USB_STEP(ENUMERATED);
+  currentDisc.lun = cbw->lun;
+
+  if (inquiry_resp.peripheral_device_type == 0x5) {
+    SET_USB_PERIPH_TYPE(CD_TYPE);
+    return CDROM_Inquiry(dev_addr, cbw, csw);
+  }
+  if (inquiry_resp.peripheral_device_type == 0x0) {
+    SET_USB_PERIPH_TYPE(MSC_TYPE);
+    return MSC_Inquiry(dev_addr, cbw, csw);
+  }
+
+  return true;
+}
+
+
+void tuh_mount_cb (uint8_t dev_addr) {
+  uint8_t buffer_void[18];
+  printf("Usb device Mounted %x\n", dev_addr);
+  uint8_t const lun = 0;
+  SET_USB_STEP(ATTACHED);
+  currentDisc.dev_addr = dev_addr;
+
 }
 
 bool read_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
@@ -122,12 +155,11 @@ bool read_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* c
     set3doDriveError();
   }
   read_done = true;
-  usb_state &= ~COMMAND_ON_GOING;
+  CLEAR_USB_CMD_ONGOING();
   return true;
 }
 
 bool block_is_ready() {
-  // usb_state &= ~COMMAND_ON_GOING;
   return read_done;
 }
 
@@ -142,22 +174,14 @@ bool write_is_ready(bool *success) {
 }
 
 bool USBDriveEject(bool eject, bool *interrupt) {
-  if ((usb_state & PERIPH_TYPE) == CD_TYPE) {
-    *interrupt = !eject;
-    if (!usb_state & ENUMERATED) {
-      requestEject = (eject?0:1);
-      LOG_SATA("usb not enumerated\n");
-      return true;
-    }
-    if (requestEject != -1) {
-      LOG_SATA("Eject already requested %d\n", requestEject);
-      return false;
-    }
-    requestEject = (eject?0:1);
-    LOG_SATA("requesting eject %d\n", requestEject);
+  if (GET_USB_PERIPH_TYPE() == CD_TYPE) {
+    // *interrupt = !eject;
+    *interrupt = true;
+    SET_USB_STEP(EJECTING);
+    LOG_SATA("usb not enumerated\n");
     return true;
   }
-  if ((usb_state & PERIPH_TYPE) == MSC_TYPE) {
+  if (GET_USB_PERIPH_TYPE() == MSC_TYPE) {
     *interrupt = true;
     return true;
   }
@@ -198,67 +222,29 @@ bool readBlock(uint32_t start, uint16_t nb_block, uint16_t block_size, uint8_t *
   blockRequired = true;
   return true;
 }
-
-bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw)
-{
-  inquiry_cb_flag = true;
-  if (csw->status != 0)
-  {
-    LOG_SATA("Inquiry failed\r\n");
-    return false;
-  }
-
-  // Print out Vendor ID, Product ID and Rev
-  LOG_SATA("%.8s %.16s rev %.4s Type 0x%x Lun %d\r\n", inquiry_resp.vendor_id, inquiry_resp.product_id, inquiry_resp.product_rev, inquiry_resp.peripheral_device_type, cbw->lun);
-
-  currentDisc.lun = cbw->lun;
-
-  if (inquiry_resp.peripheral_device_type == 0x5) {
-    usb_state |= CD_TYPE;
-    return CDROM_Inquiry(dev_addr, cbw, csw);
-  }
-
-  if (inquiry_resp.peripheral_device_type == 0x0) {
-    usb_state |= MSC_TYPE;
-    return MSC_Inquiry(dev_addr, cbw, csw);
-  }
-
-  return false;
-}
-
 //------------- IMPLEMENTATION -------------//
-
-void tuh_msc_ready_cb(uint8_t dev_addr, bool ready)
-{
-  set3doDriveReady();
-  usb_state |= DISC_IN;
-}
 
 void tuh_msc_enumerated_cb(uint8_t dev_addr)
 {
-  currentDisc.dev_addr = dev_addr;
-  usb_state |= ENUMERATED;
-  usb_state &= ~COMMAND_ON_GOING;
-  if (!startClose) CDROM_ExecuteEject(startClose);
-  startClose = true;
+  printf("##### enumerated ######\n");
 }
 
 void tuh_msc_mount_cb(uint8_t dev_addr)
 {
-  uint8_t const lun = 0;
-  usb_state |= COMMAND_ON_GOING;
   LOG_SATA("A USB MassStorage device is mounted\r\n");
-  inquiry_cb_flag = false;
-  tuh_msc_inquiry(dev_addr, lun, &inquiry_resp, inquiry_complete_cb);
+  SET_USB_STEP(MOUNTED);
+  tuh_msc_inquiry(currentDisc.dev_addr, 0, &inquiry_resp, inquiry_complete_cb);
 }
 
 void tuh_msc_umount_cb(uint8_t dev_addr)
 {
   (void) dev_addr;
   LOG_SATA("A USB MassStorage device is unmounted\r\n");
+  set3doCDReady(false);
+  set3doDriveMounted(false);
+  SET_USB_STEP(DETACHED);
+  SET_USB_PERIPH_TYPE(UNKNOWN_TYPE);
   mediaInterrupt();
-  inquiry_resp.peripheral_device_type = 0x1F;
-  usb_state &= ~DISC_MOUNTED;
 }
 
 #endif

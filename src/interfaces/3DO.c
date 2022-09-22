@@ -551,8 +551,14 @@ void handleMediaInterrupt() {
   while (!pio_sm_is_rx_fifo_empty(pio0, sm_read)) {
     pio_sm_get(pio0, sm_read);
   }
-  requestBootImage();
-  waitForLoad();
+  if (GET_USB_PERIPH_TYPE() == MSC_TYPE) {
+    requestBootImage();
+    waitForLoad();
+  }
+  if (GET_USB_PERIPH_TYPE() == CD_TYPE) {
+    set3doCDReady(GET_USB_STEP() == MOUNTED);
+    set3doDriveMounted(GET_USB_STEP() == MOUNTED);
+  }
   gpio_put(CDMDCHG, 1); //Under reset
   // pio_sm_set_enabled(pio0, sm_read, false);
   // errorCode |= POWER_OR_RESET_OCCURED;
@@ -575,7 +581,7 @@ void handleCommand(uint32_t data) {
       data_in[i] = get3doData();
     }
 
-    LOG_SATA("READ ID\n");
+    LOG_SATA("READ ID %x\n", status);
       if (errorOnDisk != 0) errorOnDisk++;
       buffer[index++] = READ_ID;
       buffer[index++] =0x00; //manufacture Id

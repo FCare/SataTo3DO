@@ -5,13 +5,26 @@
 
 
 typedef enum {
-  ENUMERATED = 0x1,
-  COMMAND_ON_GOING = 0x2,
-  DISC_IN = 0x4,
-  DISC_MOUNTED = 0x8,
+  DETACHED = 0x00,
+  ATTACHED = 0x01,
+  ENUMERATED = 0x02,
+  MOUNTED = 0x03,
+  EJECTING = 0x04,
+  USB_STATE_FLAG = DETACHED|ATTACHED|ENUMERATED|MOUNTED|EJECTING,
+  COMMAND_ON_GOING = 0x8,
+  UNKNOWN_TYPE = 0x00,
+  MSC_TYPE = 0x10,
+  CD_TYPE = 0x20,
   PERIPH_TYPE = 0x30,
 } usb_state_t;
 
+#define GET_USB_STEP() (usb_state & USB_STATE_FLAG)
+#define SET_USB_STEP(A) (usb_state = (usb_state&~USB_STATE_FLAG)|A)
+#define GET_USB_PERIPH_TYPE() (usb_state & PERIPH_TYPE)
+#define SET_USB_PERIPH_TYPE(A) (usb_state = (usb_state&~PERIPH_TYPE)|A)
+#define IS_USB_CMD_ONGOING() ((usb_state & COMMAND_ON_GOING) == COMMAND_ON_GOING)
+#define SET_USB_CMD_ONGOING() (usb_state |= COMMAND_ON_GOING)
+#define CLEAR_USB_CMD_ONGOING() (usb_state &= ~COMMAND_ON_GOING)
 
 typedef enum {
   DONE = 0x0,
@@ -21,12 +34,9 @@ typedef enum {
   CLOSE
 } fileCmd_s;
 
-#define MSC_TYPE 0x10
-#define CD_TYPE 0x20
 
 
 extern uint8_t usb_state;
-extern volatile int8_t requestEject;
 extern volatile int8_t requestLoad;
 
 extern void USB_Host_init();

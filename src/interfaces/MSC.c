@@ -74,28 +74,25 @@ static FIL file;
 
 bool MSC_Host_loop()
 {
-  #if CFG_TUH_MSC
-    if(usb_state & ENUMERATED) {
-      if (!(usb_state & COMMAND_ON_GOING)) {
-        if (!check_eject()) {
-          check_load();
-          if (usb_state & DISC_MOUNTED) {
-            //Interface shall be generic for command
-            check_file();
-            check_block();
-            check_subq();
-            return true;
-          } else {
-            return false;
-          }
-        }
-      } else {
+#if CFG_TUH_MSC
+  if (!IS_USB_CMD_ONGOING()) {
+    switch(GET_USB_STEP()) {
+      case EJECTING:
+        check_eject();
+      case MOUNTED:
         check_load();
-      }
+        check_file();
+        check_block();
+        check_subq();
+        return true;
+        break;
+      default:
+        return false;
     }
-    return true;
-  #endif
   }
+#endif
+  return false;
+}
 
 
 #if CFG_TUH_MSC
@@ -149,13 +146,9 @@ static void print_error_text(FRESULT e) {
 }
 
 static bool check_eject() {
-  if (requestEject!=-1) {
-    //Execute right now
-    LOG_SATA("Eject %d\n", requestEject);
-    requestEject = -1;
-    return true;
-  }
-  return false;
+  //Execute right now
+  LOG_SATA("Eject\n");
+  return true;
 }
 
 
@@ -179,7 +172,7 @@ static void check_load() {
 static void check_subq() {
   if (subqRequired) {
     bool found = false;
-    usb_state |= COMMAND_ON_GOING;
+    SET_USB_CMD_ONGOING();
     cd_s *target_track = &currentDisc;
     memset(buffer_subq, 0x0, 16);
     uint lba = start_Block + 150;
@@ -204,7 +197,7 @@ static void check_subq() {
         break;
       }
     }
-    usb_state &= ~COMMAND_ON_GOING;
+    CLEAR_USB_CMD_ONGOING();
     subqRequired = false;
     read_done = true;
   }
@@ -252,7 +245,7 @@ void addToPlaylist(int entry, bool *valid, bool *added) {
 static void check_block() {
   if (blockRequired) {
     // printf("Block required %d %d %d %d\n",start_Block, allImage[selected_img].info.tracks[0].lba, nb_block_Block, currentDisc.block_size_read);
-    usb_state |= COMMAND_ON_GOING;
+    SET_USB_CMD_ONGOING();
 
     cd_s *target_track = &currentDisc;
     FIL *fileOpen = &curBinFile;
@@ -295,7 +288,7 @@ static void check_block() {
       if (read_nb != nb_block_Block*currentDisc.block_size_read) LOG_SATA("Bad read %d %d\n", read_nb, nb_block_Block*currentDisc.block_size_read);
       last_pos += read_nb;
     }
-    usb_state &= ~COMMAND_ON_GOING;
+    CLEAR_USB_CMD_ONGOING();
     blockRequired = false;
     read_done = true;
   }
@@ -843,8 +836,8 @@ void loadPlaylistEntry() {
     if (f_open(&curBinFile, curBinPath, FA_READ) == FR_OK) {
       LOG_SATA("Game loaded\n");
       last_pos = 0;
-      usb_state |= DISC_MOUNTED;
-      usb_state &= ~COMMAND_ON_GOING;
+      SET_USB_STEP(MOUNTED);
+      CLEAR_USB_CMD_ONGOING();
       set3doCDReady(true);
       set3doDriveMounted(true);
     } else {
@@ -869,8 +862,8 @@ void loadBootIso() {
       // memcpy(&currentDisc, &allImage[selected_img].info, sizeof(cd_s));
       if (f_open(&curBinFile, curBinPath, FA_READ) == FR_OK) {
         last_pos = 0;
-        usb_state |= DISC_MOUNTED;
-        usb_state &= ~COMMAND_ON_GOING;
+        SET_USB_STEP(MOUNTED);
+        CLEAR_USB_CMD_ONGOING();
         set3doCDReady(true);
         set3doDriveMounted(true);
       } else {
@@ -893,8 +886,8 @@ static void handleBootImage(void) {
 
 bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   FRESULT result;
-  requestEject = -1;
   LOG_SATA("MSC_Inquiry\n");
+  if (tuh_msc_get_block_size(dev_addr, cbw->lun) == 0) return false;
   result = f_mount(&DiskFATState, "" , 1);
   if (result!=FR_OK) {
     LOG_SATA("Can not mount\n");
@@ -1055,34 +1048,34 @@ void requestCloseFile() {
 }
 
 static void check_open_file() {
-  usb_state |= COMMAND_ON_GOING;
+  SET_USB_CMD_ONGOING();
   usb_result = false;
   usb_result = (f_open(&curDataFile, curFilePath,  FA_WRITE| FA_READ |FA_OPEN_ALWAYS) == FR_OK);
-  usb_state &= ~COMMAND_ON_GOING;
+  CLEAR_USB_CMD_ONGOING();
 }
 
 static void check_write_file() {
-  usb_state |= COMMAND_ON_GOING;
+  SET_USB_CMD_ONGOING();
   uint nb_write;
   usb_result =(f_write(&curDataFile, curBuf, curBufLength, &nb_write) == FR_OK);
   usb_result =(f_sync(&curDataFile) == FR_OK);
-  usb_state &= ~COMMAND_ON_GOING;
+  CLEAR_USB_CMD_ONGOING();
 }
 
 static void check_read_file() {
-  usb_state |= COMMAND_ON_GOING;
+  SET_USB_CMD_ONGOING();
   uint nb_read;
   FRESULT res = f_read(&curDataFile, curBuf, curBufLength, &nb_read);
   usb_result = (res == FR_OK);
   if (!usb_result) printf("Issue while reading %d (%d) => %x\n", curBufLength, nb_read,res);
-  usb_state &= ~COMMAND_ON_GOING;
+  CLEAR_USB_CMD_ONGOING();
 }
 
 
 static void check_close_file() {
-  usb_state |= COMMAND_ON_GOING;
+  SET_USB_CMD_ONGOING();
   usb_result = (f_close(&curDataFile) == FR_OK);
-  usb_state &= ~COMMAND_ON_GOING;
+  CLEAR_USB_CMD_ONGOING();
 }
 
 static void check_file() {
