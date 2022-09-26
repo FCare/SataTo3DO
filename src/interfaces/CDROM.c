@@ -61,7 +61,23 @@ static bool command_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_
 
 bool CDROM_ExecuteEject() {
   SET_USB_CMD_ONGOING();
-  printf("Eject CDROM %d\n", tray_open);
+  LOG_SATA("Eject CDROM %d\n", tray_open);
+  if (!currentDisc.canBeLoaded && !currentDisc.canBeEjected) {
+    LOG_SATA("Can not load or eject\n");
+    set3doCDReady(false);
+    set3doDriveMounted(false);
+    return true;
+  }
+
+  if (!currentDisc.canBeLoaded && tray_open) {
+    LOG_SATA("Can not be loaded - force tray to false\n");
+    tray_open = false;
+  }
+  if (!currentDisc.canBeEjected && !tray_open) {
+    LOG_SATA("Can not eject - force tray to true\n");
+    tray_open = true;
+  }
+
   if ( !tuh_msc_start_stop(currentDisc.dev_addr, currentDisc.lun, tray_open, true, command_complete_cb)) {
     LOG_SATA("Got error while eject command\n");
   }
@@ -203,11 +219,16 @@ static bool read_toc_light_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, m
   return true;
 }
 
-
+static int ido = 0;
 void CDROM_ready(uint8_t dev_addr, bool ready) {
   //Get capabilities in sync
+  if (GET_USB_STEP() == ENUMERATED) {
+    if (CheckCDCapabilities(dev_addr, &currentDisc.canBeLoaded, &currentDisc.canBeEjected)){
+      LOG_SATA("Can Load %d, Can Eject %d %d\n", currentDisc.canBeLoaded, currentDisc.canBeEjected, ido++);
+      SET_USB_STEP(CONFIGURED);
+    }
+  }
   if (!ready) return;
-  CheckCDCapabilities(dev_addr);//Passer ici une structure CD)
 }
 
 bool CDROM_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {

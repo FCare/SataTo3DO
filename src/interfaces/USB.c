@@ -13,6 +13,8 @@ static void check_mount();
 
 void USB_Host_init() {
     currentDisc.dev_addr = 0xFF;
+    currentDisc.canBeLoaded = false;
+    currentDisc.canBeEjected = false;
     SET_USB_STEP(DETACHED);
     SET_USB_PERIPH_TYPE(UNKNOWN_TYPE);
 #ifdef USE_TRACE
@@ -58,6 +60,7 @@ void USB_Host_loop()
   if (!ret) {
     if(GET_USB_STEP()==ATTACHED) tuh_msc_inquiry(currentDisc.dev_addr, 0, &inquiry_resp, inquiry_complete_cb);
     if(GET_USB_STEP()==ENUMERATED) check_mount();
+    if(GET_USB_STEP()==CONFIGURED) check_mount();
   }
 }
 
@@ -112,32 +115,47 @@ static void check_mount() {
 
 static bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw)
 {
+  bool ret = false;
   if (csw->status != MSC_CSW_STATUS_GOOD)
   {
     TU_LOG1("Inquiry failed %x\r\n", csw->status);
     SET_USB_STEP(ATTACHED);
-    return false;
+    return ret;
   }
+  //At least consider we are enumerated so that configuration can be read
+  if (GET_USB_STEP() < ENUMERATED) SET_USB_STEP(ENUMERATED);
   // Print out Vendor ID, Product ID and Rev
   TU_LOG1("%.8s %.16s rev %.4s Type 0x%x Lun %d\r\n", inquiry_resp.vendor_id, inquiry_resp.product_id, inquiry_resp.product_rev, inquiry_resp.peripheral_device_type, cbw->lun);
 
   currentDisc.dev_addr = dev_addr;
 
-  CLEAR_USB_CMD_ONGOING();
-  if (GET_USB_STEP() < ENUMERATED)
-    SET_USB_STEP(ENUMERATED);
   currentDisc.lun = cbw->lun;
 
   if (inquiry_resp.peripheral_device_type == 0x5) {
     SET_USB_PERIPH_TYPE(CD_TYPE);
-    return CDROM_Inquiry(dev_addr, cbw, csw);
+    ret = CDROM_Inquiry(dev_addr, cbw, csw);
   }
   if (inquiry_resp.peripheral_device_type == 0x0) {
     SET_USB_PERIPH_TYPE(MSC_TYPE);
-    return MSC_Inquiry(dev_addr, cbw, csw);
+    ret = MSC_Inquiry(dev_addr, cbw, csw);
   }
-
-  return true;
+  if (ret) {
+    //disc is detected
+    // Be sure we have the configuration done
+    CLEAR_USB_CMD_ONGOING();
+    if (GET_USB_STEP() < CONFIGURED) {
+      if (GET_USB_PERIPH_TYPE() == CD_TYPE)
+      CDROM_ready(dev_addr, true);
+    }
+    // If we still do not have the configuration, consider we are configured
+    if (GET_USB_STEP() < CONFIGURED) {
+      //capabilities does not work, consider eject is possible
+      currentDisc.canBeLoaded = true;
+      currentDisc.canBeEjected = true;
+      SET_USB_STEP(CONFIGURED);
+    }
+  }
+  return ret;
 }
 
 void tuh_msc_ready_cb(uint8_t dev_addr, bool ready) {
@@ -249,6 +267,8 @@ void tuh_msc_umount_cb(uint8_t dev_addr)
   set3doCDReady(false);
   set3doDriveMounted(false);
   currentDisc.dev_addr = 0xFF;
+  currentDisc.canBeLoaded = false;
+  currentDisc.canBeEjected = false;
   SET_USB_STEP(DETACHED);
   SET_USB_PERIPH_TYPE(UNKNOWN_TYPE);
   mediaInterrupt();

@@ -32,6 +32,8 @@ typedef struct {
   bool hasOnlyAudio;
   track_s tracks[100];
   uint8_t offset;
+  bool canBeEjected;
+  bool canBeLoaded;
 } cd_s;
 
 extern cd_s currentDisc;

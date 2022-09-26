@@ -1069,7 +1069,7 @@ static void check_read_file() {
   uint nb_read;
   FRESULT res = f_read(&curDataFile, curBuf, curBufLength, &nb_read);
   usb_result = (res == FR_OK);
-  if (!usb_result) printf("Issue while reading %d (%d) => %x\n", curBufLength, nb_read,res);
+  if (!usb_result) LOG_SATA("Issue while reading %d (%d) => %x\n", curBufLength, nb_read,res);
   CLEAR_USB_CMD_ONGOING();
 }
 
