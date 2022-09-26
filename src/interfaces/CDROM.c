@@ -46,18 +46,23 @@ uint8_t readBuffer[20480];
 extern volatile bool is_audio;
 extern volatile bool has_subQ;
 
+static bool tray_open = false;
+
 static bool command_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
-  if (csw->status != MSC_CSW_STATUS_PASSED) {
+  if (csw->status != MSC_CSW_STATUS_GOOD) {
     if (currentDisc.mounted) {
       set3doDriveError();
     }
   }
+  tray_open = !tray_open;
   CLEAR_USB_CMD_ONGOING();
 }
 
+
 bool CDROM_ExecuteEject() {
   SET_USB_CMD_ONGOING();
-  if ( !tuh_msc_start_stop(currentDisc.dev_addr, currentDisc.lun, false, true, command_complete_cb)) {
+  printf("Eject CDROM %d\n", tray_open);
+  if ( !tuh_msc_start_stop(currentDisc.dev_addr, currentDisc.lun, tray_open, true, command_complete_cb)) {
     LOG_SATA("Got error while eject command\n");
   }
   else {
@@ -198,8 +203,19 @@ static bool read_toc_light_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, m
   return true;
 }
 
+
+void CDROM_ready(uint8_t dev_addr, bool ready) {
+  //Get capabilities in sync
+  if (!ready) return;
+  CheckCDCapabilities(dev_addr);//Passer ici une structure CD)
+}
+
 bool CDROM_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
-  if (tuh_msc_get_block_size(dev_addr, cbw->lun) == 0) return false;
+
+  if (tuh_msc_get_block_size(dev_addr, cbw->lun) == 0) {
+    return false;
+  }
+  tray_open = false; //In case of slot-in consider it has started and tray is closed
   // Get capacity of device
   currentDisc.hasOnlyAudio = true;
   currentDisc.nb_block = tuh_msc_get_block_count(dev_addr, cbw->lun);

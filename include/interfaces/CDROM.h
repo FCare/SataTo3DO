@@ -7,4 +7,6 @@ extern bool CDROM_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t cons
 
 extern bool CDROM_ExecuteEject();
 
+extern void CDROM_ready(uint8_t dev_addr, bool ready);
+
 #endif

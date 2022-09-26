@@ -112,7 +112,7 @@ static void check_mount() {
 
 static bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw)
 {
-  if (csw->status != 0)
+  if (csw->status != MSC_CSW_STATUS_GOOD)
   {
     TU_LOG1("Inquiry failed %x\r\n", csw->status);
     SET_USB_STEP(ATTACHED);
@@ -140,6 +140,11 @@ static bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_
   return true;
 }
 
+void tuh_msc_ready_cb(uint8_t dev_addr, bool ready) {
+  if (GET_USB_PERIPH_TYPE() == CD_TYPE)
+    CDROM_ready(dev_addr, ready);
+}
+
 void tuh_msc_enumerate_cb (uint8_t dev_addr) {
   uint8_t buffer_void[18];
   TU_LOG1("Usb device Mounted %x\n", dev_addr);
@@ -151,7 +156,7 @@ void tuh_mount_cb(uint8_t dev_addr) {
 }
 
 bool read_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
-  if (csw->status != MSC_CSW_STATUS_PASSED) {
+  if (csw->status != MSC_CSW_STATUS_GOOD) {
 
     set3doDriveError();
   }
