@@ -2,6 +2,7 @@
 #define _3DO_INTERFACE_H_
 
 #include <stdbool.h>
+#include "tusb.h"
 
 #define UART_LED 28
 
@@ -71,8 +72,8 @@
 #endif
 
 extern void _3DO_init();
-extern void set3doCDReady(bool on);
-extern void set3doDriveMounted(bool on);
+extern void set3doCDReady(uint8_t dev_addr, bool on);
+extern void set3doDriveMounted(uint8_t dev_addr, bool on);
 extern void set3doDriveReady();
 extern void set3doDriveError();
 

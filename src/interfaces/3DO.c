@@ -33,7 +33,7 @@ extern void USB_reset(void);
 
 #define GET_BUS(A) (((A)>>CDD0)&0xFF)
 
-extern cd_s currentDisc;
+extern cd_s currentImage;
 
 typedef enum{
   SPIN_UP = 0x2,
@@ -193,12 +193,12 @@ void wait_out_of_reset() {
   gpio_put(CDMDCHG, 1); //Under reset
 }
 
-void set3doCDReady(bool on) {
-  if (on) {
+void set3doCDReady(uint8_t dev_addr, bool on) {
+  if (on && (currentImage.dev->dev_addr == dev_addr)) {
     errorOnDisk = 0;
-    switch(currentDisc.format) {
+    switch(currentImage.format) {
       case 0x0:
-        if (currentDisc.hasOnlyAudio)
+        if (currentImage.hasOnlyAudio)
           LOG_SATA("Audio CD detected\n");
         else
           LOG_SATA("Data CD detected\n");
@@ -210,8 +210,6 @@ void set3doCDReady(bool on) {
         LOG_SATA("CD-i detected\n");
         break;
     }
-  }
-  if (on) {
     status = TRAY_IN | DISC_RDY | DISC_PRESENT | SPINNING;
     errorCode = 0;
     status &= ~CHECK_ERROR;
@@ -219,9 +217,17 @@ void set3doCDReady(bool on) {
 
 }
 
-void set3doDriveMounted(bool on) {
-  if (currentDisc.mounted != on) {
-    currentDisc.mounted = on;
+void set3doDriveMounted(uint8_t dev_addr, bool on) {
+  device_s *dev = getDevice(dev_addr);
+  if (dev->mounted != on) {
+    dev->mounted = on;
+  }
+  if (currentImage.dev->dev_addr == dev_addr) {
+    if (currentImage.curDir != NULL) free(currentImage.curDir);
+    if (currentImage.curPath != NULL) free(currentImage.curPath);
+    currentImage.curDir = NULL;
+    currentImage.curPath = NULL;
+    currentImage.dev = NULL;
   }
 }
 
@@ -391,9 +397,9 @@ char* getPathForTOC(int entry) {
       uint32_t name_length = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
       if (toc_id == entry) {
         if (flags != TOC_FLAG_FILE) return NULL;
-        int pathLength = name_length + 1 + strlen(curPath)+1;
+        int pathLength = name_length + 1 + strlen(currentImage.curPath)+1;
         char* result = malloc(pathLength);
-        snprintf(result, pathLength, "%s\\%s", curPath, &TOC[i]);
+        snprintf(result, pathLength, "%s\\%s", currentImage.curPath, &TOC[i]);
         return result;
       }
       i += name_length;
@@ -481,7 +487,7 @@ void sendData(int startlba, int nb_block, bool trace) {
       return;
     }
 
-    readBlock(startlba, 1, currentDisc.block_size_read, &buffer[0]);
+    readBlock(startlba, 1, currentImage.block_size_read, &buffer[0]);
     if (trace) b= get_absolute_time();
     while(!block_is_ready() && !errorOnDisk && gpio_get(CDRST));
 
@@ -505,7 +511,7 @@ void sendData(int startlba, int nb_block, bool trace) {
     startlba++;
     id = (id++)%2;
     if (trace) d= get_absolute_time();
-    if (!sendAnswerStatusMixed(&buffer[0], currentDisc.block_size_read, status_buffer, 2, nb_block == 0, trace)) return;
+    if (!sendAnswerStatusMixed(&buffer[0], currentImage.block_size_read, status_buffer, 2, nb_block == 0, trace)) return;
     if (trace) e = get_absolute_time();
     if (trace)
       LOG_SATA("send data a %lld, b %lld, c %lld, d %lld, e %lld\n", absolute_time_diff_us(s,a), absolute_time_diff_us(a,b), absolute_time_diff_us(b,c), absolute_time_diff_us(c,d), absolute_time_diff_us(d,e));
@@ -551,13 +557,18 @@ void handleMediaInterrupt() {
   while (!pio_sm_is_rx_fifo_empty(pio0, sm_read)) {
     pio_sm_get(pio0, sm_read);
   }
-  if (GET_USB_PERIPH_TYPE() == MSC_TYPE) {
-    requestBootImage();
-    waitForLoad();
-  }
-  if (GET_USB_PERIPH_TYPE() == CD_TYPE) {
-    set3doCDReady(GET_USB_STEP() == MOUNTED);
-    set3doDriveMounted(GET_USB_STEP() == MOUNTED);
+  for (int i=0; i<CFG_TUH_DEVICE_MAX; i++) {
+    device_s *dev = getDeviceIndex(i);
+    if (dev->dev_addr == 0xFF) continue;
+    if (dev->type == MSC_TYPE) {
+      requestBootImage();
+      waitForLoad();
+    }
+    if (dev->type == CD_TYPE) {
+      set3doCDReady(dev->dev_addr, dev->state == MOUNTED);
+      set3doDriveMounted(dev->dev_addr, dev->state  == MOUNTED);
+    }
+
   }
   gpio_put(CDMDCHG, 1); //Under reset
   // pio_sm_set_enabled(pio0, sm_read, false);
@@ -718,12 +729,12 @@ void handleCommand(uint32_t data) {
         buffer[index++] = READ_DISC_INFO;
         // LBA = (((M*60)+S)*75+F)-150
         if (status & DISC_PRESENT) {
-          buffer[index++] = currentDisc.format;
-          buffer[index++] = currentDisc.first_track;
-          buffer[index++] = currentDisc.last_track;
-          buffer[index++] = currentDisc.msf[0];
-          buffer[index++] = currentDisc.msf[1];
-          buffer[index++] = currentDisc.msf[2];
+          buffer[index++] = currentImage.format;
+          buffer[index++] = currentImage.first_track;
+          buffer[index++] = currentImage.last_track;
+          buffer[index++] = currentImage.msf[0];
+          buffer[index++] = currentImage.msf[1];
+          buffer[index++] = currentImage.msf[2];
 
         } else {
           errorCode = NOT_READY;
@@ -747,12 +758,12 @@ void handleCommand(uint32_t data) {
         LOG_SATA("READ_TOC %x\n", data_in[1]);
         buffer[index++] = READ_TOC;
         buffer[index++] = 0x0; //NixByte?
-        buffer[index++] = currentDisc.tracks[data_in[1]-1].CTRL_ADR; //ADDR
-        buffer[index++] = currentDisc.tracks[data_in[1]-1].id; //ENT_NUMBER
+        buffer[index++] = currentImage.tracks[data_in[1]-1].CTRL_ADR; //ADDR
+        buffer[index++] = currentImage.tracks[data_in[1]-1].id; //ENT_NUMBER
         buffer[index++] = 0x0;//Format
-        buffer[index++] = currentDisc.tracks[data_in[1]-1].msf[0];
-        buffer[index++] = currentDisc.tracks[data_in[1]-1].msf[1];
-        buffer[index++] = currentDisc.tracks[data_in[1]-1].msf[2];
+        buffer[index++] = currentImage.tracks[data_in[1]-1].msf[0];
+        buffer[index++] = currentImage.tracks[data_in[1]-1].msf[1];
+        buffer[index++] = currentImage.tracks[data_in[1]-1].msf[2];
         buffer[index++] = 0x0;
         buffer[index++] = status;
         sendAnswer(buffer, index, CHAN_WRITE_STATUS);
@@ -766,12 +777,12 @@ void handleCommand(uint32_t data) {
         }
         LOG_SATA("READ_SESSION\n");
         buffer[index++] = READ_SESSION;
-        if (currentDisc.multiSession) {
+        if (currentImage.multiSession) {
           //TBD with a multisession disc
           buffer[index++] = 0x80;
-          buffer[index++] = currentDisc.msf[0]; //might some other values like msf for multisession start
-          buffer[index++] = currentDisc.msf[1];
-          buffer[index++] = currentDisc.msf[2];
+          buffer[index++] = currentImage.msf[0]; //might some other values like msf for multisession start
+          buffer[index++] = currentImage.msf[1];
+          buffer[index++] = currentImage.msf[2];
           buffer[index++] = 0x0;
           buffer[index++] = 0x0;
         } else {
@@ -794,9 +805,9 @@ void handleCommand(uint32_t data) {
         }
         LOG_SATA("READ_CAPACITY\n");
         buffer[index++] = READ_CAPACITY;
-        buffer[index++] = currentDisc.msf[0];
-        buffer[index++] = currentDisc.msf[1];
-        buffer[index++] = currentDisc.msf[2];
+        buffer[index++] = currentImage.msf[0];
+        buffer[index++] = currentImage.msf[1];
+        buffer[index++] = currentImage.msf[2];
         buffer[index++] = 0x0; //0x8?
         buffer[index++] = 0x0;
         buffer[index++] = status;
@@ -869,17 +880,17 @@ what's your reply to 0x83?
           }
         }
         if (data_in[0] == 0x0) {
-          currentDisc.block_size_read = (data_in[2]<<8)|(data_in[3]);
+          currentImage.block_size_read = (data_in[2]<<8)|(data_in[3]);
           if ((data_in[4] & 0xC0) == 0x80) {
-            currentDisc.block_size_read = 2353; //CDDA + error correction
+            currentImage.block_size_read = 2353; //CDDA + error correction
           }
           if ((data_in[4] & 0xC0) == 0x40) {
-            currentDisc.block_size_read = 2448; //CDDA+subcode
+            currentImage.block_size_read = 2448; //CDDA+subcode
           }
           if ((data_in[4] & 0xC0) == 0xC0) {
-            currentDisc.block_size_read = 2449; //CDDA+subcode+error correction
+            currentImage.block_size_read = 2449; //CDDA+subcode+error correction
           }
-          LOG_SATA("Block size to %d\n",currentDisc.block_size_read );
+          LOG_SATA("Block size to %d\n",currentImage.block_size_read );
         }
         buffer[index++] = SET_MODE;
         buffer[index++] = status;
@@ -1210,7 +1221,11 @@ void core1_entry() {
         LOG_SATA("Got a reset Status!\n");
         reset_occured = true;
         wait_out_of_reset();
-        set3doDriveMounted(false);
+        for (int i= 0; i<CFG_TUH_HUB; i++) {
+          device_s *dev = getDeviceIndex(i);
+          if (dev->dev_addr != 0xFF)
+            set3doDriveMounted(dev->dev_addr, false);
+        }
         status |= CHECK_ERROR;
         errorCode = POWER_OR_RESET_OCCURED;
         restartReadPio();

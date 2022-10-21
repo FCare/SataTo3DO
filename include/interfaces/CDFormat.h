@@ -1,12 +1,20 @@
 #ifndef __CDROM_FORMAT_H_INCLUDE__
 #define __CDROM_FORMAT_H_INCLUDE__
 
+#include "diskio.h"
+
 typedef enum {
   MODE_0 = 0,
   MODE_1,
   MODE_2,
   CDDA
 } mode_s;
+
+typedef struct dir_s{
+  DIR dir;
+  int nbSubDir;
+  struct dir_s *subDirs;
+} dir_t;
 
 typedef struct {
   uint8_t id;
@@ -17,7 +25,6 @@ typedef struct {
 } track_s;
 
 typedef struct {
-  bool mounted;
   bool multiSession;
   uint8_t first_track;
   uint8_t last_track;
@@ -27,15 +34,14 @@ typedef struct {
   uint32_t nb_block;
   uint16_t block_size;
   uint16_t block_size_read;
-  uint8_t dev_addr;
-  uint8_t lun;
   bool hasOnlyAudio;
   track_s tracks[100];
   uint8_t offset;
-  bool canBeEjected;
-  bool canBeLoaded;
+  device_s *dev;
+  dir_t *curDir;
+  char *curPath;
 } cd_s;
 
-extern cd_s currentDisc;
+extern cd_s currentImage;
 
 #endif
