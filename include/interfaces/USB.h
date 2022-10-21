@@ -21,7 +21,7 @@ typedef enum {
 } device_type_t;
 
 typedef struct {
-  bool mounted;
+  // bool mounted;
   uint8_t dev_addr;
   uint8_t lun;
   bool canBeEjected;

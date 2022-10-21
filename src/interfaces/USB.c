@@ -43,7 +43,6 @@ void USB_Host_init() {
       devices[i].state = DETACHED;
       devices[i].type = UNKNOWN_TYPE;
       devices[i].tray_open = false;
-      devices[i].mounted = false;
     }
     currentImage.curDir = NULL;
     currentImage.curPath = NULL;
@@ -139,7 +138,6 @@ void USB_reset() {
   startClose = false;
   for (int i=0; i<CFG_TUH_DEVICE_MAX; i++) {
     device_s *dev = getDeviceIndex(i);
-    if (dev->mounted)
       tuh_msc_umount_cb(dev->dev_addr);
   }
   tusb_reset();
@@ -316,6 +314,15 @@ void tuh_msc_umount_cb(uint8_t dev_addr)
   {
     set3doCDReady(dev_addr, false);
     set3doDriveMounted(dev_addr, false);
+  }
+
+  if (currentImage.dev->dev_addr == dev_addr) {
+    printf("Unmount USB key used for the currentImage!\n");
+    if (currentImage.curDir != NULL) free(currentImage.curDir);
+    if (currentImage.curPath != NULL) free(currentImage.curPath);
+    currentImage.curDir = NULL;
+    currentImage.curPath = NULL;
+    currentImage.dev = NULL;
   }
   dev->dev_addr = 0xFF;
   dev->canBeLoaded = false;

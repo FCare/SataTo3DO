@@ -219,10 +219,8 @@ void set3doCDReady(uint8_t dev_addr, bool on) {
 
 void set3doDriveMounted(uint8_t dev_addr, bool on) {
   device_s *dev = getDevice(dev_addr);
-  if (dev->mounted != on) {
-    dev->mounted = on;
-  }
-  if (currentImage.dev->dev_addr == dev_addr) {
+  if ((currentImage.dev->dev_addr == dev_addr) && (!on)) {
+    LOG_SATA("set3doDriveMounted %d\n", on);
     if (currentImage.curDir != NULL) free(currentImage.curDir);
     if (currentImage.curPath != NULL) free(currentImage.curPath);
     currentImage.curDir = NULL;
@@ -415,47 +413,97 @@ void getTocFull(int index, int nb) {
   int id = 0;
   bool ended = false;
   memset(TOC,0xff,sizeof(TOC));
-  if (!seekTocTo(index)) {
-    LOG_SATA("Index %d is out of files number\n", index);
-    return;
+
+  if (getTocLevel() == 0) {
+    int max = CFG_TUH_DEVICE_MAX;
+    if (nb<CFG_TUH_DEVICE_MAX) max = nb;
+    for (int i=0; i<max; i++) {
+      int nbUsb = 0;
+      int nbCD = 0;
+      device_s *dev = getDeviceIndex(i);
+      if (dev->dev_addr != 0xFF) {
+        toc_entry *te = malloc(sizeof(toc_entry));
+        memset(te, 0x0, sizeof(toc_entry));
+        char name[20];
+        if (dev->type == CD_TYPE) {
+          snprintf(name, 20, "CD %d", nbCD);
+          nbCD++;
+        }
+        if (dev->type == MSC_TYPE) {
+          snprintf(name, 20, "USB %d", nbUsb);
+          nbUsb++;
+        }
+        te->flags = (dev->isFatFs)?TOC_FLAG_DIR:TOC_FLAG_FILE;
+        te->toc_id = dev->dev_addr<<24;
+        te->name_length = strlen(name) + 1;
+        te->name = malloc(te->name_length);
+        snprintf(te->name, te->name_length, "%s", name);
+        te->name[te->name_length-1] = 0;
+
+        TOC[toclen++]=te->flags>>24;
+        TOC[toclen++]=te->flags>>16;
+        TOC[toclen++]=te->flags>>8;
+        TOC[toclen++]=te->flags&0xff;
+        TOC[toclen++]=te->toc_id>>24;
+        TOC[toclen++]=te->toc_id>>16;
+        TOC[toclen++]=te->toc_id>>8;
+        TOC[toclen++]=te->toc_id&0xff;
+        TOC[toclen++]=te->name_length>>24;
+        TOC[toclen++]=te->name_length>>16;
+        TOC[toclen++]=te->name_length>>8;
+        TOC[toclen++]=te->name_length&0xff;
+        for(uint32_t t=0;t<te->name_length;t++) {
+          TOC[toclen++]=te->name[t];
+        }
+        if (te->name != NULL) free(te->name);
+        free(te);
+      }
+    }
+  } else {
+    if (!seekTocTo(index)) {
+      LOG_SATA("Index %d is out of files number\n", index);
+      return;
+    }
+    while(!ended) {
+      toc_entry *te = malloc(sizeof(toc_entry));
+      memset(te, 0x0, sizeof(toc_entry));
+      if ((index == 0) && (id == 0) && (getTocLevel() != 0)) {
+        if (!getReturnTocEntry(te)) break;
+      } else {
+        if (!getNextTOCEntry(te)) break;
+      }
+      id++;
+      if ((nb != -1) && (id >= (nb))) {
+        LOG_SATA("Limit has been reached on Id %d\n", id, nb);
+        ended = true;
+      } else {
+        LOG_SATA("Got %d files on %d\n", id, nb+index);
+      }
+      TOC[toclen++]=te->flags>>24;
+      TOC[toclen++]=te->flags>>16;
+      TOC[toclen++]=te->flags>>8;
+      TOC[toclen++]=te->flags&0xff;
+      TOC[toclen++]=te->toc_id>>24;
+      TOC[toclen++]=te->toc_id>>16;
+      TOC[toclen++]=te->toc_id>>8;
+      TOC[toclen++]=te->toc_id&0xff;
+      TOC[toclen++]=te->name_length>>24;
+      TOC[toclen++]=te->name_length>>16;
+      TOC[toclen++]=te->name_length>>8;
+      TOC[toclen++]=te->name_length&0xff;
+      for(uint32_t t=0;t<te->name_length;t++) {
+        TOC[toclen++]=te->name[t];
+      }
+      if (te->name != NULL) free(te->name);
+      free(te);
+      if (toclen > (sizeof(TOC)-(128+13))) {
+        LOG_SATA("Buffer is full\n");
+        ended = true;
+      }
+    }
+
   }
-  while(!ended) {
-    toc_entry *te = malloc(sizeof(toc_entry));
-    memset(te, 0x0, sizeof(toc_entry));
-    if ((index == 0) && (id == 0) && (getTocLevel() != 0)) {
-      if (!getReturnTocEntry(te)) break;
-    } else {
-      if (!getNextTOCEntry(te)) break;
-    }
-    id++;
-    if ((nb != -1) && (id >= (nb))) {
-      LOG_SATA("Limit has been reached on Id %d\n", id, nb);
-      ended = true;
-    } else {
-      LOG_SATA("Got %d files on %d\n", id, nb+index);
-    }
-    TOC[toclen++]=te->flags>>24;
-    TOC[toclen++]=te->flags>>16;
-    TOC[toclen++]=te->flags>>8;
-    TOC[toclen++]=te->flags&0xff;
-    TOC[toclen++]=te->toc_id>>24;
-    TOC[toclen++]=te->toc_id>>16;
-    TOC[toclen++]=te->toc_id>>8;
-    TOC[toclen++]=te->toc_id&0xff;
-    TOC[toclen++]=te->name_length>>24;
-    TOC[toclen++]=te->name_length>>16;
-    TOC[toclen++]=te->name_length>>8;
-    TOC[toclen++]=te->name_length&0xff;
-    for(uint32_t t=0;t<te->name_length;t++) {
-      TOC[toclen++]=te->name[t];
-    }
-    if (te->name != NULL) free(te->name);
-    free(te);
-    if (toclen > (sizeof(TOC)-(128+13))) {
-      LOG_SATA("Buffer is full\n");
-      ended = true;
-    }
-  }
+
 }
 
 void getToc(int index, int offset, uint8_t* buffer) {
@@ -557,12 +605,19 @@ void handleMediaInterrupt() {
   while (!pio_sm_is_rx_fifo_empty(pio0, sm_read)) {
     pio_sm_get(pio0, sm_read);
   }
+  LOG_SATA("Look for BootImage\n");
   for (int i=0; i<CFG_TUH_DEVICE_MAX; i++) {
+    LOG_SATA("Look for BootImage on %d\n", i);
     device_s *dev = getDeviceIndex(i);
-    if (dev->dev_addr == 0xFF) continue;
+    if (dev->dev_addr == 0xFF) {
+      LOG_SATA("%d is not a real device\n", i);
+      continue;
+    }
     if (dev->type == MSC_TYPE) {
+      LOG_SATA("%d is a MSC\n", i);
       requestBootImage();
       waitForLoad();
+      LOG_SATA("Loaded on %d\n", i);
     }
     if (dev->type == CD_TYPE) {
       set3doCDReady(dev->dev_addr, dev->state == MOUNTED);
@@ -1221,11 +1276,6 @@ void core1_entry() {
         LOG_SATA("Got a reset Status!\n");
         reset_occured = true;
         wait_out_of_reset();
-        for (int i= 0; i<CFG_TUH_HUB; i++) {
-          device_s *dev = getDeviceIndex(i);
-          if (dev->dev_addr != 0xFF)
-            set3doDriveMounted(dev->dev_addr, false);
-        }
         status |= CHECK_ERROR;
         errorCode = POWER_OR_RESET_OCCURED;
         restartReadPio();

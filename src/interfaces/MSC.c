@@ -234,14 +234,12 @@ void addToPlaylist(int entry, bool *valid, bool *added) {
 
 static void check_block(uint8_t dev_addr) {
   if (blockRequired) {
-    // printf("Block required %d %d %d %d\n",start_Block, allImage[selected_img].info.tracks[0].lba, nb_block_Block, currentImage.block_size_read);
     usb_cmd_on_going = true;
 
     cd_s *target_track = &currentImage;
     FIL *fileOpen = &curBinFile;
     uint read_nb = 0;
     FSIZE_t offset = (start_Block - target_track->tracks[0].lba)*currentImage.block_size + currentImage.offset;
-    // printf("Read %lu %lu %lu %lu\n", offset, currentImage.offset, start_Block,target_track->tracks[0].lba);
     if (currentImage.block_size != currentImage.block_size_read) {
       if (currentImage.format != 0) {
         //Assuming a XA format has only MODE_2 and CDDA track
@@ -704,6 +702,7 @@ static bool extractBootImage(FILINFO *fileInfo) {
   char *newPath = malloc(strlen(currentImage.curPath)+i+2);
   sprintf(&newPath[0], "%s\\%s", currentImage.curPath, fileInfo->fname);
   if (!isA3doImage(newPath)) {
+    LOG_SATA("Is not a 3DO image %s\n", currentImage.curPath);
     free(newPath);
     return false;
   }
@@ -849,23 +848,26 @@ bool loadBootIso(uint8_t dev_addr) {
   dir_t *curDir = getNewDir();
   char *curPath = (char *) malloc(5);
   snprintf(curPath, 5, "%d:", dev_addr-1);
+  LOG_SATA("Try to load on %s\n", curPath);
   res = f_findfirst(&curDir->dir, &fileInfo, curPath, "boot.iso");
   if ((res != FR_OK) || (strlen(fileInfo.fname) == 0)) {
     //report error. Boot iso is not found
+    LOG_SATA("Error on %s\n", curPath);
   } else {
+    device_s *dev = getDevice(dev_addr);
+    currentImage.dev = dev;
+    if (currentImage.curDir != NULL) free(currentImage.curDir);
+    if (currentImage.curPath != NULL) free(currentImage.curPath);
+    currentImage.curDir = curDir;
+    currentImage.curPath = curPath;
     //load boot.iso
     if (extractBootImage(&fileInfo)) {
       // memcpy(&currentImage, &allImage[selected_img].info, sizeof(cd_s));
       if (f_open(&curBinFile, curBinPath, FA_READ) == FR_OK) {
-        device_s *dev = getDevice(dev_addr);
         last_pos = 0;
         dev->state = MOUNTED;
         usb_cmd_on_going = false;
-        currentImage.dev = dev;
-        if (currentImage.curDir != NULL) free(currentImage.curDir);
-        if (currentImage.curPath != NULL) free(currentImage.curPath);
-        currentImage.curDir = curDir;
-        currentImage.curPath = curPath;
+        LOG_SATA("Boot iso path %s\n", currentImage.curPath);
         set3doCDReady(currentImage.dev->dev_addr, true);
         set3doDriveMounted(currentImage.dev->dev_addr, true);
         ret = true;
@@ -873,10 +875,17 @@ bool loadBootIso(uint8_t dev_addr) {
         LOG_SATA("Can not open the Game!\n");
       }
     }
+    else {
+      LOG_SATA("Can not extract on %s\n", curPath);
+    }
   }
   if (!ret) {
     free(curDir);
     free(curPath);
+    if (currentImage.curDir != NULL) free(currentImage.curDir);
+    if (currentImage.curPath != NULL) free(currentImage.curPath);
+    currentImage.curDir = NULL;
+    currentImage.curPath = NULL;
   }
   return ret;
 }
@@ -914,7 +923,7 @@ bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   mediaInterrupt();
 }
 
-static int current_toc = 0;
+static int current_toc = -2;
 static int current_toc_level = 0;
 static int current_toc_offset = 0;
 
@@ -926,55 +935,80 @@ void setTocLevel(int index) {
   FRESULT res;
   FILINFO fileInfo;
   int curDirNb = 0;
+  LOG_SATA("current_toc %d vs %d\n", current_toc, index);
+
   if (index == -1) {
-    char *lastDir = rindex(currentImage.curPath, '\\');
-    if (lastDir != NULL) {
-      bool found = false;
-      char *newPath = malloc(lastDir - currentImage.curPath + 1);
-      memcpy(newPath, currentImage.curPath, lastDir - currentImage.curPath);
-      newPath[lastDir-currentImage.curPath] = 0;
+    LOG_SATA("Set Toc Level start %s level %d\n", currentImage.curPath, current_toc_level);
+    if (current_toc_level <= 1) {
       f_closedir(&currentImage.curDir->dir);
-      res = f_opendir(&currentImage.curDir->dir, newPath);
-      current_toc_offset = 0;
       free(currentImage.curPath);
-      currentImage.curPath = newPath;
+      current_toc_level = 0;
       current_toc = 0;
-      current_toc_level -= 1;
+    } else {
+      char *lastDir = rindex(currentImage.curPath, '\\');
+      if (lastDir != NULL) {
+        bool found = false;
+        char *newPath = malloc(lastDir - currentImage.curPath + 1);
+        memcpy(newPath, currentImage.curPath, lastDir - currentImage.curPath);
+        newPath[lastDir-currentImage.curPath] = 0;
+        f_closedir(&currentImage.curDir->dir);
+        res = f_opendir(&currentImage.curDir->dir, newPath);
+        current_toc_offset = 0;
+        free(currentImage.curPath);
+        currentImage.curPath = newPath;
+        LOG_SATA("Set Toc Level path %s\n", currentImage.curPath);
+        current_toc = 0;
+        current_toc_level -= 1;
+      }
     }
     return;
   }
   if (current_toc != index) {
     //need to change the current TOC level
     //Get required Toc Entry
-    int i = 0;
-    f_closedir(&currentImage.curDir->dir);
-    f_opendir(&currentImage.curDir->dir, currentImage.curPath);
-    while(i < index) {
-      if (getNextValidToc(&fileInfo)) {
-        i++;
-        current_toc_offset++;
-      }
-      if (fileInfo.fname[0] == 0) {
-        //Should raise en arror. Shall never happen
-        LOG_SATA("!!! WTF not found\n");
-        return; //End of file list
-      }
-    }
-    if (fileInfo.fattrib & AM_DIR) {
-      int i = strlen(fileInfo.fname);
-      char *newPath = malloc(strlen(currentImage.curPath)+i+2);
-      sprintf(&newPath[0], "%s\\%s", currentImage.curPath, fileInfo.fname);
-      free(currentImage.curPath);
-      currentImage.curPath = newPath;
-      f_closedir(&currentImage.curDir->dir);
+    if ((current_toc == 0) && (current_toc_level == 0)){
+      currentImage.curDir = getNewDir();
+      currentImage.curPath = (char*)malloc(20 * sizeof(char));
+      snprintf(currentImage.curPath, 20, "%d://", (index>>24)-1);
       res = f_opendir(&currentImage.curDir->dir, currentImage.curPath);
       current_toc_offset = 0;
       current_toc_level++;
+      LOG_SATA("Setup root path to %s\n", currentImage.curPath);
     } else {
-      LOG_SATA("!!! WTF not a directory\n");
+      int i = 0;
+      LOG_SATA("Load path %s\n", currentImage.curPath);
+      f_closedir(&currentImage.curDir->dir);
+      f_opendir(&currentImage.curDir->dir, currentImage.curPath);
+      while(i < index) {
+        LOG_SATA("Look for entry %d\n", i);
+        if (getNextValidToc(&fileInfo)) {
+          i++;
+          current_toc_offset++;
+        }
+        if (fileInfo.fname[0] == 0) {
+          //Should raise en arror. Shall never happen
+          LOG_SATA("!!! WTF not found\n");
+          return; //End of file list
+        }
+      }
+      LOG_SATA("Finish at entry %d\n", i);
+      if (fileInfo.fattrib & AM_DIR) {
+        int i = strlen(fileInfo.fname);
+        char *newPath = malloc(strlen(currentImage.curPath)+i+2);
+        sprintf(&newPath[0], "%s\\%s", currentImage.curPath, fileInfo.fname);
+        free(currentImage.curPath);
+        currentImage.curPath = newPath;
+        LOG_SATA("Set Toc Level path  to dir %s\n", currentImage.curPath);
+        f_closedir(&currentImage.curDir->dir);
+        res = f_opendir(&currentImage.curDir->dir, currentImage.curPath);
+        current_toc_offset = 0;
+        current_toc_level++;
+      } else {
+        LOG_SATA("!!! WTF not a directory\n");
+      }
     }
+    current_toc = index;
   }
-  current_toc = index;
 }
 
 static bool getNextValidToc(FILINFO *fileInfo) {
@@ -988,6 +1022,7 @@ static bool getNextValidToc(FILINFO *fileInfo) {
   if (!(fileInfo->fattrib & AM_DIR)) {
     if (!validateFile(fileInfo)) return false;
   }
+  LOG_SATA("File %s is ok\n", fileInfo->fname);
   return true;
 }
 

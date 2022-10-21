@@ -49,9 +49,7 @@ extern volatile bool has_subQ;
 static bool command_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   device_s *dev = getDevice(dev_addr);
   if (csw->status != MSC_CSW_STATUS_GOOD) {
-    if (dev->mounted) {
-      set3doDriveError();
-    }
+    set3doDriveError();
   }
   dev->tray_open = !dev->tray_open;
   usb_cmd_on_going = false;

@@ -51,7 +51,7 @@
 
 // CFG_TUSB_DEBUG is defined by compiler in DEBUG build
 #ifdef USE_TRACE
-#define CFG_TUSB_DEBUG           3
+#define CFG_TUSB_DEBUG           1
 #else
 #define CFG_TUSB_DEBUG           0
 #endif
