@@ -11,7 +11,6 @@ bool usb_cmd_on_going = false;
 
 static scsi_inquiry_resp_t inquiry_resp;
 static bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw);
-static void check_mount(uint8_t dev_addr);
 
 static device_s devices[CFG_TUH_DEVICE_MAX] = {0};
 
@@ -92,9 +91,10 @@ void USB_Host_loop()
         ret = Default_Host_loop(dev);
       }
       if (!ret) {
-        if(dev->state==ATTACHED) tuh_msc_inquiry(dev->dev_addr, 0, &inquiry_resp, inquiry_complete_cb);
-        if(dev->state==ENUMERATED) check_mount(dev->dev_addr);
-        if(dev->state==CONFIGURED) check_mount(dev->dev_addr);
+        if(dev->state==INQUIRY) {
+          dev->state = ATTACHED;
+          tuh_msc_inquiry(dev->dev_addr, 0, &inquiry_resp, inquiry_complete_cb);
+        }
       }
   }
 }
@@ -129,7 +129,7 @@ fileCmd_s fileCmdRequired;
 static bool check_eject(device_s *dev) {
   //Execute right now
   LOG_SATA("Eject\n");
-  if (CDROM_ExecuteEject(dev)) dev->state = ATTACHED;
+  if (CDROM_ExecuteEject(dev)) dev->state = INQUIRY;
     return true;
 }
 
@@ -143,23 +143,14 @@ void USB_reset() {
   tusb_reset();
 }
 
-static void check_mount(uint8_t dev_addr) {
-  //Send a sense loop
-  uint8_t const lun = 0;
-  usb_cmd_on_going = true;
-  checkForMedia(dev_addr, lun);
-  usb_cmd_on_going = false;
-}
-
 static bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw)
 {
-  bool ret = false;
   device_s *dev = getDevice(dev_addr);
   if (csw->status != MSC_CSW_STATUS_GOOD)
   {
     TU_LOG1("Inquiry failed %x\r\n", csw->status);
-    dev->state = ATTACHED;
-    return ret;
+    dev->state = INQUIRY;
+    return false;
   }
   //At least consider we are enumerated so that configuration can be read
   if (dev->state < ENUMERATED) dev->state = ENUMERATED;
@@ -172,47 +163,35 @@ static bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_
 
   if (inquiry_resp.peripheral_device_type == 0x5) {
     dev->type = CD_TYPE;
-    ret = CDROM_Inquiry(dev_addr, cbw, csw);
   }
   if (inquiry_resp.peripheral_device_type == 0x0) {
     dev->type = MSC_TYPE;
-    ret = MSC_Inquiry(dev_addr, cbw, csw);
   }
-  if (ret) {
-    //disc is detected
-    // Be sure we have the configuration done
-    usb_cmd_on_going = false;
-    if (dev->state < CONFIGURED) {
-      if (dev->type == CD_TYPE)
-      CDROM_ready(dev_addr, true);
-    }
-    // If we still do not have the configuration, consider we are configured
-    if (dev->state < CONFIGURED) {
-      //capabilities does not work, consider eject is possible for CD
-      dev->canBeLoaded = (dev->type == CD_TYPE);
-      dev->canBeEjected = (dev->type == CD_TYPE);
-      dev->state = CONFIGURED;
-    }
-  }
-  return ret;
+  checkForMedia(dev_addr, dev->lun);
+
+  return true;
 }
 
 void tuh_msc_ready_cb(uint8_t dev_addr, bool ready) {
   device_s *dev=getDevice(dev_addr);
   if (dev->type == CD_TYPE)
     CDROM_ready(dev_addr, ready);
+  if (!ready) {
+    checkForMedia(dev_addr, dev->lun);
+  }
 }
 
 void tuh_msc_enumerate_cb (uint8_t dev_addr) {
   uint8_t buffer_void[18];
   device_s *dev = getDevice(dev_addr);
-  TU_LOG1("Usb device Mounted %x\n", dev_addr);
+  TU_LOG1("Usb device enumerated %x\n", dev_addr);
   dev->dev_addr = dev_addr;
 }
 
 void tuh_mount_cb(uint8_t dev_addr) {
+  TU_LOG1("Device mounted %d\n", dev_addr);
   device_s *dev = getDevice(dev_addr);
-  dev->state = ATTACHED;
+  dev->state = INQUIRY;
 }
 
 bool read_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
@@ -297,10 +276,34 @@ void tuh_msc_enumerated_cb(uint8_t dev_addr)
 
 void tuh_msc_mount_cb(uint8_t dev_addr)
 {
+  bool ret = false;
   device_s *dev = getDevice(dev_addr);
   LOG_SATA("A USB MassStorage device is mounted\r\n");
   dev->state = MOUNTED;
-  tuh_msc_inquiry(dev->dev_addr, 0, &inquiry_resp, inquiry_complete_cb);
+
+  if (dev->type == CD_TYPE) {
+    CDROM_Inquiry(dev_addr, dev->lun);
+  }
+  if (dev->type == MSC_TYPE) {
+    MSC_Inquiry(dev_addr, dev->lun);
+  }
+  if (ret) {
+    //disc is detected
+    // Be sure we have the configuration done
+    usb_cmd_on_going = false;
+    if (dev->state < CONFIGURED) {
+      if (dev->type == CD_TYPE)
+      CDROM_ready(dev_addr, true);
+    }
+    // If we still do not have the configuration, consider we are configured
+    if (dev->state < CONFIGURED) {
+      //capabilities does not work, consider eject is possible for CD
+      dev->canBeLoaded = (dev->type == CD_TYPE);
+      dev->canBeEjected = (dev->type == CD_TYPE);
+      dev->state = CONFIGURED;
+      checkForMedia(dev_addr, dev->lun);
+    }
+  }
 }
 
 void tuh_msc_umount_cb(uint8_t dev_addr)

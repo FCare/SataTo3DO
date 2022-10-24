@@ -901,10 +901,10 @@ static bool handleBootImage(uint8_t dev_addr) {
   }
 }
 
-bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
+bool MSC_Inquiry(uint8_t dev_addr, uint8_t lun) {
   FRESULT result;
   LOG_SATA("MSC_Inquiry %d\n", dev_addr);
-  if (tuh_msc_get_block_size(dev_addr, cbw->lun) == 0) {
+  if (tuh_msc_get_block_size(dev_addr, lun) == 0) {
     LOG_SATA("MSC block is 0\n");
     return false;
   }

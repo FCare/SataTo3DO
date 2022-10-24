@@ -7,11 +7,12 @@
 
 typedef enum {
   DETACHED = 0x00,
-  ATTACHED = 0x01,
-  ENUMERATED = 0x02,
-  CONFIGURED = 0x03,
-  MOUNTED = 0x04,
-  EJECTING = 0x05,
+  INQUIRY,
+  ATTACHED,
+  ENUMERATED,
+  CONFIGURED,
+  MOUNTED,
+  EJECTING,
 } usb_state_t;
 
 typedef enum {

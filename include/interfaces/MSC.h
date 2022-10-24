@@ -8,7 +8,7 @@ extern char *curPath;
 
 extern bool MSC_Host_loop(device_s *dev);
 
-extern bool MSC_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw);
+extern bool MSC_Inquiry(uint8_t dev_addr, uint8_t lun);
 
 extern bool MSC_ExecuteEject(bool eject);
 

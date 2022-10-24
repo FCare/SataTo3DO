@@ -91,7 +91,7 @@ static bool check_eject(uint8_t dev_addr) {
   //Execute right now
   device_s *dev= getDevice(dev_addr);
   LOG_SATA("Eject %d\n", dev_addr);
-  if (CDROM_ExecuteEject(dev_addr)) dev->state = ATTACHED;
+  if (CDROM_ExecuteEject(dev_addr)) dev->state = INQUIRY;
   return true;
 }
 
@@ -232,17 +232,17 @@ void CDROM_ready(uint8_t dev_addr, bool ready) {
   if (!ready) return;
 }
 
-bool CDROM_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
+bool CDROM_Inquiry(uint8_t dev_addr, uint8_t lun) {
 
   device_s *dev = getDevice(dev_addr);
-  if (tuh_msc_get_block_size(dev_addr, cbw->lun) == 0) {
+  if (tuh_msc_get_block_size(dev_addr, lun) == 0) {
     return false;
   }
   dev->tray_open = false; //In case of slot-in consider it has started and tray is closed
   // Get capacity of device
   currentImage.hasOnlyAudio = true;
-  currentImage.nb_block = tuh_msc_get_block_count(dev_addr, cbw->lun);
-  currentImage.block_size = tuh_msc_get_block_size(dev_addr, cbw->lun);
+  currentImage.nb_block = tuh_msc_get_block_count(dev_addr, lun);
+  currentImage.block_size = tuh_msc_get_block_size(dev_addr, lun);
   currentImage.block_size_read = currentImage.block_size;
 
   int lba = currentImage.nb_block + 150;
@@ -258,7 +258,7 @@ bool CDROM_Inquiry(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw)
   LOG_SATA("Block Count = %lu, Block Size: %lu\r\n", currentImage.nb_block, currentImage.block_size);
   LOG_SATA("Disc duration is %02d:%02d:%02d\n", currentImage.msf[0], currentImage.msf[1], currentImage.msf[2]);
 
-  if (!tuh_msc_read_toc(dev_addr, cbw->lun, readBuffer, 1, 0, 0, read_toc_light_complete_cb)) {
+  if (!tuh_msc_read_toc(dev_addr, lun, readBuffer, 1, 0, 0, read_toc_light_complete_cb)) {
       LOG_SATA("Got error with toc read\n");
       return false;
   }
