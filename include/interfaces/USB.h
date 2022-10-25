@@ -28,6 +28,7 @@ typedef struct {
   bool canBeEjected;
   bool canBeLoaded;
   bool isFatFs;
+  bool useable;
   device_type_t type;
   usb_state_t state;
   bool tray_open;

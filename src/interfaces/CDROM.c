@@ -239,6 +239,7 @@ bool CDROM_Inquiry(uint8_t dev_addr, uint8_t lun) {
     return false;
   }
   dev->tray_open = false; //In case of slot-in consider it has started and tray is closed
+  dev->useable = true;
   // Get capacity of device
   currentImage.hasOnlyAudio = true;
   currentImage.nb_block = tuh_msc_get_block_count(dev_addr, lun);

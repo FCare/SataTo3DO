@@ -417,9 +417,9 @@ void getTocFull(int index, int nb) {
   if (getTocLevel() == 0) {
     int max = CFG_TUH_DEVICE_MAX;
     if (nb<CFG_TUH_DEVICE_MAX) max = nb;
+    int nbUsb = 0;
+    int nbCD = 0;
     for (int i=0; i<max; i++) {
-      int nbUsb = 0;
-      int nbCD = 0;
       device_s *dev = getDeviceIndex(i);
       if (dev->dev_addr != 0xFF) {
         toc_entry *te = malloc(sizeof(toc_entry));

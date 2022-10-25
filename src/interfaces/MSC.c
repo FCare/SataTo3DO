@@ -916,9 +916,11 @@ bool MSC_Inquiry(uint8_t dev_addr, uint8_t lun) {
   if (result!=FR_OK) {
     LOG_SATA("Can not mount\n");
     dev->isFatFs = false;
+    dev->useable = false;
     return false;
   }
   dev->isFatFs = true;
+  dev->useable = true;
   LOG_SATA("MSC mounted here: %s\n", path);
   mediaInterrupt();
 }

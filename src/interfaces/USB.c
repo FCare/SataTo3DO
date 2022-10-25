@@ -37,6 +37,7 @@ device_s* getDeviceIndex(uint8_t idx) {
 void USB_Host_init() {
     for (int i = 0; i<CFG_TUH_DEVICE_MAX; i++) {
       devices[i].dev_addr = 0xFF;
+      devices[i].useable = false;
       devices[i].canBeLoaded = false;
       devices[i].canBeEjected = false;
       devices[i].state = DETACHED;
@@ -322,6 +323,7 @@ void tuh_msc_umount_cb(uint8_t dev_addr)
     currentImage.dev = NULL;
   }
   dev->dev_addr = 0xFF;
+  dev->useable = false;
   dev->canBeLoaded = false;
   dev->canBeEjected = false;
   dev->state = DETACHED;
