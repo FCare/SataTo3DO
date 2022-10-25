@@ -182,15 +182,9 @@ void tuh_msc_ready_cb(uint8_t dev_addr, bool ready) {
 }
 
 void tuh_msc_enumerate_cb (uint8_t dev_addr) {
-  uint8_t buffer_void[18];
   device_s *dev = getDevice(dev_addr);
   TU_LOG1("Usb device enumerated %x\n", dev_addr);
   dev->dev_addr = dev_addr;
-}
-
-void tuh_mount_cb(uint8_t dev_addr) {
-  TU_LOG1("Device mounted %d\n", dev_addr);
-  device_s *dev = getDevice(dev_addr);
   dev->state = INQUIRY;
 }
 
@@ -278,7 +272,7 @@ void tuh_msc_mount_cb(uint8_t dev_addr)
 {
   bool ret = false;
   device_s *dev = getDevice(dev_addr);
-  LOG_SATA("A USB MassStorage device is mounted\r\n");
+  LOG_SATA("A USB MassStorage device is mounted %d\r\n", dev_addr);
   dev->state = MOUNTED;
 
   if (dev->type == CD_TYPE) {
