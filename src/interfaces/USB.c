@@ -46,7 +46,8 @@ void USB_Host_init() {
     }
     currentImage.curDir = NULL;
     currentImage.curPath = NULL;
-    currentImage.dev = NULL;
+    currentImage.dev_addr = 0xFF;
+    currentImage.lun = 0x0;
     usb_cmd_on_going = false;
 #ifdef USE_TRACE
     stdio_init_all();
@@ -297,13 +298,14 @@ void tuh_msc_umount_cb(uint8_t dev_addr)
     set3doDriveMounted(dev_addr, false);
   }
 
-  if (currentImage.dev->dev_addr == dev_addr) {
-    printf("Unmount USB key used for the currentImage!\n");
+  if (currentImage.dev_addr == dev_addr) {
+    LOG_SATA("Unmount USB key used for the currentImage!\n");
     if (currentImage.curDir != NULL) free(currentImage.curDir);
     if (currentImage.curPath != NULL) free(currentImage.curPath);
     currentImage.curDir = NULL;
     currentImage.curPath = NULL;
-    currentImage.dev = NULL;
+    currentImage.dev_addr = 0xFF;
+    currentImage.lun = 0x0;
   }
   dev->dev_addr = 0xFF;
   dev->useable = false;

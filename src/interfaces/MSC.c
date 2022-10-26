@@ -24,6 +24,7 @@ static mount_mode onMountMode = BOOT_ISO;
 #define PLAYLIST_MAX 16
 typedef struct playlist_entry_s{
   char *path[PLAYLIST_MAX];
+  int tocid[PLAYLIST_MAX];
   int nb_entries;
   int current_entry;
 } playlist_entry;
@@ -61,6 +62,10 @@ static bool handleBootImage(uint8_t dev_addr);
 static FSIZE_t last_pos = 0;
 
 static FIL file;
+
+int getPlaylistEntries() {
+  return playlist.nb_entries;
+}
 
 bool MSC_Host_loop(device_s *dev)
 {
@@ -137,6 +142,7 @@ static void print_error_text(FRESULT e) {
 
 static bool check_eject(uint8_t dev_addr) {
   //Execute right now
+  if (dev_addr == currentImage.dev_addr) return false;
   LOG_SATA("Eject\n");
   return true;
 }
@@ -160,8 +166,8 @@ static void check_load(uint8_t dev_addr) {
 
 
 static void check_subq(uint8_t dev_addr) {
-  if (currentImage.dev == NULL) return;
-  if (subqRequired) {
+  if (currentImage.dev_addr == 0xFF) return;
+  if (subqRequired && (dev_addr == currentImage.dev_addr)) {
     bool found = false;
     usb_cmd_on_going = true;
     cd_s *target_track = &currentImage;
@@ -202,7 +208,7 @@ void printPlaylist(void) {
 }
 
 void clearPlaylist(void) {
-  LOG_SATA("Clear laylist!\n");
+  LOG_SATA("Clear playlist!\n");
   for (int i=0; i<playlist.nb_entries; i++) {
     if (playlist.path[i] != NULL) {
       free(playlist.path[i]);
@@ -216,6 +222,7 @@ void clearPlaylist(void) {
 
 void addToPlaylist(int entry, bool *valid, bool *added) {
   char *entry_path = NULL;
+  LOG_SATA("Add to playlist %x\n", entry);
   entry_path = getPathForTOC(entry);
   if (entry_path == NULL) {
     *valid = false;
@@ -229,13 +236,14 @@ void addToPlaylist(int entry, bool *valid, bool *added) {
     return;
   }
   *added = true;
+  playlist.tocid[playlist.nb_entries] = entry;
   playlist.path[playlist.nb_entries++] = entry_path;
   LOG_SATA("Add to playlist %s %d\n", entry_path, playlist.nb_entries);
 }
 
 static void check_block(uint8_t dev_addr) {
-  if (currentImage.dev == NULL) return;
-  if (blockRequired) {
+  if (currentImage.dev_addr == 0xFF) return;
+  if (blockRequired && (dev_addr == currentImage.dev_addr)) {
     usb_cmd_on_going = true;
 
     cd_s *target_track = &currentImage;
@@ -337,7 +345,7 @@ static bool isA3doImage(char * path) {
 }
 
 static bool LoadfromCue(char *filePath) {
-  if (currentImage.dev == NULL) return;
+  if (currentImage.dev_addr == 0xFF) return;
   FIL myFile;
   FRESULT fr;
   bool  valid = false;
@@ -500,7 +508,7 @@ static bool LoadfromCue(char *filePath) {
 }
 
 static bool ValidateInfofromCue(FILINFO *fileInfo) {
-  if (currentImage.dev == NULL) return;
+  if (currentImage.dev_addr == 0xFF) return;
   FIL myFile;
   UINT i = strlen(fileInfo->fname);
   FRESULT fr;
@@ -633,7 +641,7 @@ static bool ValidateInfofromCue(FILINFO *fileInfo) {
 }
 
 static bool ValidateInfofromIso(FILINFO *fileInfo) {
-  if (currentImage.dev == NULL) return;
+  if (currentImage.dev_addr == 0xFF) return;
   FIL myFile;
   UINT i = strlen(fileInfo->fname);
   FRESULT fr;
@@ -647,7 +655,7 @@ static bool ValidateInfofromIso(FILINFO *fileInfo) {
 }
 
 static bool LoadfromIso(char *filePath) {
-  if (currentImage.dev == NULL) return false;
+  if (currentImage.dev_addr == 0xFF) return false;
   FIL myFile;
   FILINFO fileInfo;
   FRESULT fr;
@@ -702,7 +710,7 @@ static bool LoadfromIso(char *filePath) {
 
 
 static bool extractBootImage(FILINFO *fileInfo, char* curPath, uint8_t dev_addr) {
-  if (currentImage.dev != NULL) return;
+  if (currentImage.dev_addr != 0xFF) return;
   FIL myFile;
   UINT i = strlen(fileInfo->fname);
   FRESULT fr;
@@ -729,7 +737,8 @@ static bool extractBootImage(FILINFO *fileInfo, char* curPath, uint8_t dev_addr)
   if (curBinPath != NULL) free(curBinPath);
 
   device_s *dev = getDevice(dev_addr);
-  currentImage.dev = dev;
+  currentImage.dev_addr = dev->dev_addr;
+  currentImage.lun = dev->lun;
 
   if (currentImage.curPath != NULL) free(currentImage.curPath);
   currentImage.curPath = curPath;
@@ -825,32 +834,51 @@ static bool buildDir(dir_t *dirInfo, char *path) {
 
 bool loadPlaylistEntry(uint8_t dev_addr) {
   bool ret = false;
+  bool loaded = false;
   FRESULT res;
   FILINFO fileInfo;
-  LOG_SATA("try to load %d %s\n", playlist.current_entry, playlist.path[playlist.current_entry]);
-  if (loadFile(playlist.path[playlist.current_entry])) {
-    LOG_SATA("Load entry %d\n",playlist.current_entry);
+  LOG_SATA("try to load (%x) %d %s\n", playlist.tocid[playlist.current_entry], playlist.current_entry, playlist.path[playlist.current_entry]);
+  device_s *new_dev = getDevice(playlist.tocid[playlist.current_entry]>>24);
+  if (getTocEntry(playlist.tocid[playlist.current_entry]) == 0x0) {
+    //Entry detected as device
+    LOG_SATA("Detected an entry\n");
+    device_s *dev = getDevice(dev_addr);
+    memcpy(&currentImage, &new_dev->rawImage, sizeof(cd_s));
+    new_dev->state = MOUNTED;
+    usb_cmd_on_going = false;
+    set3doCDReady(new_dev->dev_addr, true);
+    set3doDriveMounted(new_dev->dev_addr, true);
+    loaded = true;
+    ret = true;
+  } else {
+    LOG_SATA("Try to load\n");
+    currentImage.dev_addr = new_dev->dev_addr;
+    currentImage.lun = new_dev->lun;
+    if (loadFile(playlist.path[playlist.current_entry])) {
+      LOG_SATA("Load entry %d\n",playlist.current_entry);
+      loaded = true;
+      if (f_open(&curBinFile, curBinPath, FA_READ) == FR_OK) {
+        device_s *dev = getDevice(dev_addr);
+        LOG_SATA("Game loaded\n");
+        last_pos = 0;
+        dev->state = MOUNTED;
+        usb_cmd_on_going = false;
+        set3doCDReady(currentImage.dev_addr, true);
+        set3doDriveMounted(currentImage.dev_addr, true);
+        ret = true;
+      } else {
+        LOG_SATA("Can not open the Game!\n");
+      }
+    }
+  }
+  if (loaded) {
     playlist.current_entry++;
     if (playlist.current_entry == playlist.nb_entries) {
       LOG_SATA("Playlist done - clearing\n");
       clearPlaylist();
     }
-
-    // memcpy(&currentImage, &allImage[selected_img].info, sizeof(cd_s));
-    if (f_open(&curBinFile, curBinPath, FA_READ) == FR_OK) {
-      device_s *dev = getDevice(dev_addr);
-      LOG_SATA("Game loaded\n");
-      last_pos = 0;
-      dev->state = MOUNTED;
-      usb_cmd_on_going = false;
-      // currentImage.dev = dev;
-      set3doCDReady(currentImage.dev->dev_addr, true);
-      set3doDriveMounted(currentImage.dev->dev_addr, true);
-      ret = true;
-    } else {
-      LOG_SATA("Can not open the Game!\n");
-    }
   }
+
   return ret;
 }
 
@@ -863,6 +891,7 @@ bool loadBootIso(uint8_t dev_addr) {
   char *curPath = (char *) malloc(5);
   snprintf(curPath, 5, "%d:", dev_addr-1);
   LOG_SATA("Try to load on %s\n", curPath);
+  device_s *dev = getDevice(dev_addr);
   res = f_findfirst(&curDir->dir, &fileInfo, curPath, "boot.iso");
   if ((res != FR_OK) || (strlen(fileInfo.fname) == 0)) {
     //report error. Boot iso is not found
@@ -875,11 +904,11 @@ bool loadBootIso(uint8_t dev_addr) {
       // memcpy(&currentImage, &allImage[selected_img].info, sizeof(cd_s));
       if (f_open(&curBinFile, curBinPath, FA_READ) == FR_OK) {
         last_pos = 0;
-        currentImage.dev->state = MOUNTED;
+        dev->state = MOUNTED;
         usb_cmd_on_going = false;
         LOG_SATA("Boot iso path %s\n", currentImage.curPath);
-        set3doCDReady(currentImage.dev->dev_addr, true);
-        set3doDriveMounted(currentImage.dev->dev_addr, true);
+        set3doCDReady(currentImage.dev_addr, true);
+        set3doDriveMounted(currentImage.dev_addr, true);
         ret = true;
       } else {
         LOG_SATA("Can not open the Game!\n");
@@ -887,13 +916,15 @@ bool loadBootIso(uint8_t dev_addr) {
         if (currentImage.curPath != NULL) free(currentImage.curPath);
         currentImage.curDir = NULL;
         currentImage.curPath = NULL;
-        currentImage.dev = NULL;
+        currentImage.dev_addr = 0xFF;
+        currentImage.lun = 0;
       }
     }
     else {
       currentImage.curDir = NULL;
       currentImage.curPath = NULL;
-      currentImage.dev = NULL;
+      currentImage.dev_addr = 0xFF;
+      currentImage.lun = 0;
       LOG_SATA("Can not extract on %s\n", curPath);
     }
   }
@@ -905,8 +936,9 @@ bool loadBootIso(uint8_t dev_addr) {
 }
 
 static bool handleBootImage(uint8_t dev_addr) {
-  if ((currentImage.dev != NULL) && (currentImage.dev->type == MSC_TYPE) && (currentImage.dev->dev_addr != dev_addr)) {
-    LOG_SATA("Boot image is on %d\n", currentImage.dev->dev_addr);
+  device_s *dev = getDevice(currentImage.dev_addr);
+  if ((currentImage.dev_addr != 0xFF) && (dev->type == MSC_TYPE) && (currentImage.dev_addr != dev_addr)) {
+    LOG_SATA("Boot image is on %d\n", currentImage.dev_addr);
     return true;
   }
   LOG_SATA("Handle Boot image %d (%d)\n", onMountMode, playlist.nb_entries);
@@ -943,28 +975,42 @@ bool MSC_Inquiry(uint8_t dev_addr, uint8_t lun) {
   mediaInterrupt();
 }
 
-static int current_toc = -2;
+static int current_toc = 0x00000000;
 static int current_toc_level = 0;
+// static int current_toc_index = 0xFF;
 static int current_toc_offset = 0;
 
 int getTocLevel(void) {
   return current_toc_level;
 }
 
+int getTocIndex(void) {
+  return current_toc>>24;
+}
+
+int getTocEntry(int index) {
+  return (index&0xFFFFFF);
+}
+
+static bool isUp(int index) {
+  return (getTocEntry(index)==0xFFFFFF);
+}
+
 void setTocLevel(int index) {
-  if (currentImage.dev == NULL) return;
+  if (currentImage.dev_addr == 0xFF) return;
   FRESULT res;
   FILINFO fileInfo;
   int curDirNb = 0;
-  LOG_SATA("current_toc %d vs %d\n", current_toc, index);
+  LOG_SATA("current_toc %d (%d) vs %d (%d)\n", getTocEntry(current_toc), current_toc>>24, getTocEntry(index), index>>24);
 
-  if (index == -1) {
+  if (isUp(index)) {
     LOG_SATA("Set Toc Level start %s level %d\n", currentImage.curPath, current_toc_level);
     if (current_toc_level <= 1) {
       f_closedir(&currentImage.curDir->dir);
       free(currentImage.curPath);
       current_toc_level = 0;
-      current_toc = 0;
+      // current_toc_index = 0xFF;
+      current_toc = 0x00000000;
     } else {
       char *lastDir = rindex(currentImage.curPath, '\\');
       if (lastDir != NULL) {
@@ -978,7 +1024,7 @@ void setTocLevel(int index) {
         free(currentImage.curPath);
         currentImage.curPath = newPath;
         LOG_SATA("Set Toc Level path %s\n", currentImage.curPath);
-        current_toc = 0;
+        current_toc &= ~0xFFFFFF;
         current_toc_level -= 1;
       }
     }
@@ -987,9 +1033,10 @@ void setTocLevel(int index) {
   if (current_toc != index) {
     //need to change the current TOC level
     //Get required Toc Entry
-    if ((current_toc == 0) && (current_toc_level == 0)){
+    if (((getTocEntry(current_toc)) == 0) && (current_toc_level == 0)){
       currentImage.curDir = getNewDir();
       currentImage.curPath = (char*)malloc(20 * sizeof(char));
+      // current_toc_index = index>>24;
       snprintf(currentImage.curPath, 20, "%d://", (index>>24)-1);
       res = f_opendir(&currentImage.curDir->dir, currentImage.curPath);
       current_toc_offset = 0;
@@ -1000,7 +1047,7 @@ void setTocLevel(int index) {
       LOG_SATA("Load path %s\n", currentImage.curPath);
       f_closedir(&currentImage.curDir->dir);
       f_opendir(&currentImage.curDir->dir, currentImage.curPath);
-      while(i < index) {
+      while(i < getTocEntry(index)) {
         LOG_SATA("Look for entry %d\n", i);
         if (getNextValidToc(&fileInfo)) {
           i++;
@@ -1033,7 +1080,7 @@ void setTocLevel(int index) {
 }
 
 static bool getNextValidToc(FILINFO *fileInfo) {
-  if (currentImage.dev == NULL) return;
+  if (currentImage.dev_addr == 0xFF) return;
   FRESULT res;
   res = f_readdir(&currentImage.curDir->dir, fileInfo);                   /* Read a directory item */
   if (res != FR_OK) fileInfo->fname[0] = 0;  /* Break on error or end of dir */
@@ -1049,7 +1096,7 @@ static bool getNextValidToc(FILINFO *fileInfo) {
 }
 
 bool seekTocTo(int index) {
-  if (currentImage.dev == NULL) return;
+  if (currentImage.dev_addr == 0xFF) return;
   FILINFO fileInfo;
   int i = 0;
   f_closedir(&currentImage.curDir->dir);
@@ -1099,7 +1146,7 @@ bool getNextTOCEntry(toc_entry* toc) {
 }
 
 void requestOpenFile(char* name, uint16_t name_length, bool write) {
-  if (currentImage.dev == NULL) return;
+  if (currentImage.dev_addr == 0xFF) return;
   uint16_t length = name_length + strlen(currentImage.curPath) + 1;
   if (curFilePath != NULL) free(curFilePath);
   curFilePath = malloc(length);

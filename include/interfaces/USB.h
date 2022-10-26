@@ -3,6 +3,7 @@
 
 #include "tusb.h"
 #include "diskio.h"
+#include "CDFormat.h"
 
 
 typedef enum {
@@ -33,6 +34,7 @@ typedef struct {
   usb_state_t state;
   bool tray_open;
   FATFS  DiskFATState;
+  cd_s rawImage;
 } device_s;
 
 

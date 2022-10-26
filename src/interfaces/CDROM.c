@@ -55,6 +55,9 @@ static bool command_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_
   usb_cmd_on_going = false;
 }
 
+void wakeUpCDRom(uint8_t dev_addr, uint8_t lun) {
+  tuh_msc_test_unit_ready(dev_addr, lun, NULL);
+}
 
 bool CDROM_ExecuteEject(uint8_t dev_addr) {
   usb_cmd_on_going = true;
@@ -106,17 +109,16 @@ static bool speedChange = false;
 static uint16_t CDSpeed;
 
 static void check_block(uint8_t dev_addr) {
-  if (currentImage.dev == NULL) return;
-  if (blockRequired  && (dev_addr == currentImage.dev->dev_addr)) {
+  if (blockRequired  && (dev_addr == currentImage.dev_addr)) {
     usb_cmd_on_going = true;
     blockRequired = false;
     if (!is_audio) {
-      if ( !tuh_msc_read10_sync(currentImage.dev->dev_addr, currentImage.dev->lun, buffer_Block, start_Block, nb_block_Block, read_complete_cb)) {
+      if ( !tuh_msc_read10_sync(currentImage.dev_addr, currentImage.lun, buffer_Block, start_Block, nb_block_Block, read_complete_cb)) {
         LOG_SATA("Got error with block read\n");
         return;
       }
     } else {
-      if ( !tuh_msc_read_cd(currentImage.dev->dev_addr, currentImage.dev->lun, buffer_Block, start_Block, nb_block_Block, has_subQ, read_complete_cb)) {
+      if ( !tuh_msc_read_cd(currentImage.dev_addr, currentImage.lun, buffer_Block, start_Block, nb_block_Block, has_subQ, read_complete_cb)) {
         LOG_SATA("Got error with block read\n");
         return;
       }
@@ -125,11 +127,10 @@ static void check_block(uint8_t dev_addr) {
 }
 
 static bool check_subq(uint8_t dev_addr) {
-  if (currentImage.dev == NULL) return;
-  if (subqRequired && (dev_addr == currentImage.dev->dev_addr)) {
+  if (subqRequired && (dev_addr == currentImage.dev_addr)) {
     usb_cmd_on_going = true;
     subqRequired = false;
-    if (!tuh_msc_read_sub_channel(currentImage.dev->dev_addr, currentImage.dev->lun, buffer_subq, read_complete_cb)) {
+    if (!tuh_msc_read_sub_channel(currentImage.dev_addr, currentImage.lun, buffer_subq, read_complete_cb)) {
       LOG_SATA("Got error with sub Channel read\n");
       return false;
     }
@@ -138,11 +139,10 @@ static bool check_subq(uint8_t dev_addr) {
 }
 
 static void check_speed(uint8_t dev_addr) {
-  if (currentImage.dev == NULL) return;
-  if (speedChange && (dev_addr == currentImage.dev->dev_addr)) {
+  if (speedChange && (dev_addr == currentImage.dev_addr)) {
     usb_cmd_on_going = true;
     speedChange = false;
-    if ( !tuh_msc_set_speed(currentImage.dev->dev_addr, currentImage.dev->lun, CDSpeed, 0xFFFF, read_complete_cb)) {
+    if ( !tuh_msc_set_speed(currentImage.dev_addr, currentImage.lun, CDSpeed, 0xFFFF, read_complete_cb)) {
       LOG_SATA("Got error with block read\n");
       return;
     }
@@ -157,41 +157,46 @@ static bool setCDSpeed(uint16_t speed) {
 
 static bool read_header_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
   usb_cmd_on_going = false;
+  LOG_SATA("read_header_complete_cb\n");
   device_s *dev = getDevice(dev_addr);
   if (readBuffer[0] == 0x2) {
     /* 00h - audio; 01h - Mode 1 (games) - Mode 2 (CD-XA photoCD) */
     //Photo CD shall have an audio track. CD-i are Mode 2 but without audio.
-    currentImage.format = 0x20; //Only CD-ROM, CD-DA and CD-XA are supported
+    dev->rawImage.format = 0x20; //Only CD-ROM, CD-DA and CD-XA are supported
   }
-  if (dev->state < MOUNTED) dev->state = MOUNTED;
-  set3doCDReady(dev_addr, true);
-  set3doDriveMounted(dev_addr, true);
-  mediaInterrupt();
+  if (currentImage.dev_addr == 0xFF) {
+    memcpy(&currentImage, &dev->rawImage, sizeof(cd_s));
+    if (dev->state < MOUNTED) dev->state = MOUNTED;
+    set3doCDReady(dev_addr, true);
+    set3doDriveMounted(dev_addr, true);
+    mediaInterrupt();
+  }
   return true;
 }
 
 static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
-  currentImage.nb_track = ((readBuffer[0]<<8)+readBuffer[1] - 2)/8;
+  device_s *dev = getDevice(dev_addr);
+  dev->rawImage.nb_track = ((readBuffer[0]<<8)+readBuffer[1] - 2)/8;
 
-  currentImage.first_track = readBuffer[2];
-  currentImage.last_track = readBuffer[3];
+  dev->rawImage.first_track = readBuffer[2];
+  dev->rawImage.last_track = readBuffer[3];
 
-  LOG_SATA("First %d, last %d nb %d\n", currentImage.first_track, currentImage.last_track, currentImage.nb_track);
-  for (int i = 0; i < currentImage.nb_track-1; i++) {
+  LOG_SATA("First %d, last %d nb %d\n", dev->rawImage.first_track, dev->rawImage.last_track, dev->rawImage.nb_track);
+  for (int i = 0; i < dev->rawImage.nb_track-1; i++) {
     int index = 4+8*i;
     //OxAA as id mean lead out
-    currentImage.tracks[i].id = readBuffer[index + 2];
-    currentImage.tracks[i].CTRL_ADR = readBuffer[index + 1];
-    currentImage.tracks[i].msf[0] = readBuffer[index + 5]; //MSF
-    currentImage.tracks[i].msf[1] = readBuffer[index + 6];
-    currentImage.tracks[i].msf[2] = readBuffer[index + 7];
-    if ((currentImage.tracks[i].CTRL_ADR & 0x4) != 0) currentImage.hasOnlyAudio = false;
-    currentImage.tracks[i].lba = currentImage.tracks[i].msf[0]*60*75+currentImage.tracks[i].msf[1]*75+currentImage.tracks[i].msf[2] - 150;
-    LOG_SATA("Track[%d] 0x%x (0x%x)=> %d:%d:%d\n", i, currentImage.tracks[i].id, currentImage.tracks[i].CTRL_ADR, currentImage.tracks[i].msf[0], currentImage.tracks[i].msf[1], currentImage.tracks[i].msf[2]);
+    dev->rawImage.tracks[i].id = readBuffer[index + 2];
+    dev->rawImage.tracks[i].CTRL_ADR = readBuffer[index + 1];
+    dev->rawImage.tracks[i].msf[0] = readBuffer[index + 5]; //MSF
+    dev->rawImage.tracks[i].msf[1] = readBuffer[index + 6];
+    dev->rawImage.tracks[i].msf[2] = readBuffer[index + 7];
+    if ((dev->rawImage.tracks[i].CTRL_ADR & 0x4) != 0) dev->rawImage.hasOnlyAudio = false;
+    dev->rawImage.tracks[i].lba = dev->rawImage.tracks[i].msf[0]*60*75+dev->rawImage.tracks[i].msf[1]*75+dev->rawImage.tracks[i].msf[2] - 150;
+    LOG_SATA("Track[%d] 0x%x (0x%x)=> %d:%d:%d\n", i, dev->rawImage.tracks[i].id, dev->rawImage.tracks[i].CTRL_ADR, dev->rawImage.tracks[i].msf[0], dev->rawImage.tracks[i].msf[1], dev->rawImage.tracks[i].msf[2]);
   }
 
-  uint32_t first_track = currentImage.tracks[0].msf[0]*60*75+currentImage.tracks[0].msf[1]*75+currentImage.tracks[0].msf[2] - 150;
-  if (currentImage.tracks[0].CTRL_ADR & 0x4) {
+  uint32_t first_track = dev->rawImage.tracks[0].msf[0]*60*75+dev->rawImage.tracks[0].msf[1]*75+dev->rawImage.tracks[0].msf[2] - 150;
+  if (dev->rawImage.tracks[0].CTRL_ADR & 0x4) {
     if (!tuh_msc_read_header(dev_addr, cbw->lun, readBuffer, first_track, read_header_complete_cb)) {
       LOG_SATA("Got error with header read\n");
       return false;
@@ -204,15 +209,16 @@ static bool read_toc_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw
 }
 
 static bool read_toc_light_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
-  currentImage.nb_track = (((readBuffer[0]<<8)+readBuffer[1]) - 2)/8;
+  device_s *dev = getDevice(dev_addr);
+  dev->rawImage.nb_track = (((readBuffer[0]<<8)+readBuffer[1]) - 2)/8;
 
-  currentImage.first_track = readBuffer[2];
-  currentImage.last_track = readBuffer[3];
+  dev->rawImage.first_track = readBuffer[2];
+  dev->rawImage.last_track = readBuffer[3];
 
-  LOG_SATA("First %d, last %d nbTrack %d\n", currentImage.first_track, currentImage.last_track, currentImage.nb_track);
+  LOG_SATA("First %d, last %d nbTrack %d\n", dev->rawImage.first_track, dev->rawImage.last_track, dev->rawImage.nb_track);
 
-  if (currentImage.nb_track > 1) {
-    if (!tuh_msc_read_toc(dev_addr, cbw->lun, readBuffer, 1, 0, currentImage.nb_track-1, read_toc_complete_cb)) {
+  if (dev->rawImage.nb_track > 1) {
+    if (!tuh_msc_read_toc(dev_addr, cbw->lun, readBuffer, 1, 0, dev->rawImage.nb_track-1, read_toc_complete_cb)) {
         LOG_SATA("Got error with toc read\n");
         return false;
     }
@@ -267,35 +273,35 @@ bool CDROM_Inquiry(uint8_t dev_addr, uint8_t lun) {
   dev->useable = true;
 
 
-  if (currentImage.dev == NULL) {
-    LOG_SATA("Use the CD as potential source\n");
-    currentImage.dev = dev;
-    // Get capacity of device
-    currentImage.hasOnlyAudio = true;
-    currentImage.nb_block = tuh_msc_get_block_count(dev_addr, lun);
-    currentImage.block_size = tuh_msc_get_block_size(dev_addr, lun);
-    currentImage.block_size_read = currentImage.block_size;
+  LOG_SATA("Use the CD as potential source\n");
+  dev->rawImage.dev_addr = dev->dev_addr;
+  dev->rawImage.lun = dev->lun;
+  // Get capacity of device
+  dev->rawImage.hasOnlyAudio = true;
+  dev->rawImage.nb_block = tuh_msc_get_block_count(dev_addr, lun);
+  dev->rawImage.block_size = tuh_msc_get_block_size(dev_addr, lun);
+  dev->rawImage.block_size_read = dev->rawImage.block_size;
 
-    int lba = currentImage.nb_block + 150;
-    currentImage.msf[0] = lba/(60*75);
-    lba %= 60*75;
-    currentImage.msf[1] = lba / 75;
-    currentImage.msf[2] = lba % 75;
+  int lba = dev->rawImage.nb_block + 150;
+  dev->rawImage.msf[0] = lba/(60*75);
+  lba %= 60*75;
+  dev->rawImage.msf[1] = lba / 75;
+  dev->rawImage.msf[2] = lba % 75;
 
-    //Assume type is CD-DA or CD-ROM always
-    currentImage.format = 0x0; /*00 CD-DA or CD-ROM / 10 CD-I / 20 XA */
+  //Assume type is CD-DA or CD-ROM always
+  dev->rawImage.format = 0x0; /*00 CD-DA or CD-ROM / 10 CD-I / 20 XA */
 
-    LOG_SATA("Disk Size: %lu MB\r\n", currentImage.nb_block / ((1024*1024)/currentImage.block_size));
-    LOG_SATA("Block Count = %lu, Block Size: %lu\r\n", currentImage.nb_block, currentImage.block_size);
-    LOG_SATA("Disc duration is %02d:%02d:%02d\n", currentImage.msf[0], currentImage.msf[1], currentImage.msf[2]);
+  LOG_SATA("Disk Size: %lu MB\r\n", dev->rawImage.nb_block / ((1024*1024)/dev->rawImage.block_size));
+  LOG_SATA("Block Count = %lu, Block Size: %lu\r\n", dev->rawImage.nb_block, dev->rawImage.block_size);
+  LOG_SATA("Disc duration is %02d:%02d:%02d\n", dev->rawImage.msf[0], dev->rawImage.msf[1], dev->rawImage.msf[2]);
 
-    if (!tuh_msc_read_toc(dev_addr, lun, readBuffer, 1, 0, 0, read_toc_light_complete_cb)) {
-      LOG_SATA("Got error with toc read\n");
-      return false;
-    }
-
-    setCDSpeed(706); //4x speed
+  if (!tuh_msc_read_toc(dev_addr, lun, readBuffer, 1, 0, 0, read_toc_light_complete_cb)) {
+    LOG_SATA("Got error with toc read\n");
+    return false;
   }
+
+  setCDSpeed(706); //4x speed
+
   return true;
 }
 

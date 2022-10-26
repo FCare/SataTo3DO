@@ -9,4 +9,6 @@ extern bool CDROM_ExecuteEject();
 
 extern void CDROM_ready(uint8_t dev_addr, bool ready);
 
+extern void wakeUpCDRom(uint8_t dev_addr, uint8_t lun);
+
 #endif

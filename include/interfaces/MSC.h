@@ -14,6 +14,8 @@ extern bool MSC_ExecuteEject(bool eject);
 
 extern void setTocLevel(int index);
 extern int getTocLevel(void);
+extern int getTocIndex(void);
+extern int getTocEntry(int index);
 
 extern bool getNextTOCEntry(toc_entry* toc);
 extern bool getReturnTocEntry(toc_entry* toc);
@@ -35,6 +37,8 @@ extern void requestCloseFile();
 
 extern void requestBootImage();
 extern void waitForLoad();
+
+extern int getPlaylistEntries();
 
 
 #endif

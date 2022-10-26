@@ -194,8 +194,7 @@ void wait_out_of_reset() {
 }
 
 void set3doCDReady(uint8_t dev_addr, bool on) {
-  if (currentImage.dev == NULL) return;
-  if (on && (currentImage.dev->dev_addr == dev_addr)) {
+  if (on && (currentImage.dev_addr == dev_addr)) {
     errorOnDisk = 0;
     switch(currentImage.format) {
       case 0x0:
@@ -216,21 +215,21 @@ void set3doCDReady(uint8_t dev_addr, bool on) {
     errorCode = 0;
     status &= ~CHECK_ERROR;
   } else {
-    if (on) LOG_SATA("Current Image is on dev addr %x but CD is %x\n", currentImage.dev->dev_addr, dev_addr);
+    if (on) LOG_SATA("Current Image is on dev addr %x but CD is %x\n", currentImage.dev_addr, dev_addr);
   }
 
 }
 
 void set3doDriveMounted(uint8_t dev_addr, bool on) {
   device_s *dev = getDevice(dev_addr);
-  if (currentImage.dev == NULL) return;
-  if ((currentImage.dev->dev_addr == dev_addr) && (!on)) {
+  if ((currentImage.dev_addr == dev_addr) && (!on)) {
     LOG_SATA("set3doDriveMounted %d\n", on);
     if (currentImage.curDir != NULL) free(currentImage.curDir);
     if (currentImage.curPath != NULL) free(currentImage.curPath);
     currentImage.curDir = NULL;
     currentImage.curPath = NULL;
-    currentImage.dev = NULL;
+    currentImage.dev_addr = 0xFF;
+    currentImage.lun = 0x0;
   }
 }
 
@@ -393,21 +392,27 @@ static void handleTocChange(int index) {
 }
 
 char* getPathForTOC(int entry) {
-  for (int i=0; i<2048;) {
-    uint32_t flags = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
-    if (flags != TOC_FLAG_INVALID) {
-      uint32_t toc_id = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
-      uint32_t name_length = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
-      if (toc_id == entry) {
-        if (flags != TOC_FLAG_FILE) return NULL;
-        int pathLength = name_length + 1 + strlen(currentImage.curPath)+1;
-        char* result = malloc(pathLength);
-        snprintf(result, pathLength, "%s\\%s", currentImage.curPath, &TOC[i]);
-        return result;
+  if (getTocEntry(entry)==0x0) {
+    char* result = malloc(7);
+    snprintf(result, 7, "%d://", (entry>>24)-1);
+    return result;
+  } else {
+    for (int i=0; i<2048;) {
+      uint32_t flags = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
+      if (flags != TOC_FLAG_INVALID) {
+        uint32_t toc_id = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
+        uint32_t name_length = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
+        if (toc_id == entry) {
+          if (flags != TOC_FLAG_FILE) return NULL;
+          int pathLength = name_length + 1 + strlen(currentImage.curPath)+1;
+          char* result = malloc(pathLength);
+          snprintf(result, pathLength, "%s\\%s", currentImage.curPath, &TOC[i]);
+          return result;
+        }
+        i += name_length;
+      } else {
+        return NULL;
       }
-      i += name_length;
-    } else {
-      return NULL;
     }
   }
   return NULL;
@@ -484,6 +489,8 @@ void getTocFull(int index, int nb) {
       } else {
         LOG_SATA("Got %d files on %d\n", id, nb+index);
       }
+      te->toc_id &= ~(0xFF<<24);
+      te->toc_id |= getTocIndex()<<24;
       TOC[toclen++]=te->flags>>24;
       TOC[toclen++]=te->flags>>16;
       TOC[toclen++]=te->flags>>8;
@@ -611,6 +618,17 @@ void handleMediaInterrupt() {
     pio_sm_get(pio0, sm_read);
   }
   LOG_SATA("Look for BootImage\n");
+  if (getPlaylistEntries() == 0) {
+    currentImage.dev_addr = 0xFF;
+    currentImage.lun = 0x0;
+  }
+  if (currentImage.dev_addr != 0xFF) {
+    device_s *current_dev = getDevice(currentImage.dev_addr);
+    if (current_dev->type == CD_TYPE) {
+      currentImage.dev_addr = 0xFF;
+      currentImage.lun = 0x0;
+    }
+  }
   for (int i=0; i<CFG_TUH_DEVICE_MAX; i++) {
     LOG_SATA("Look for BootImage on %d\n", i);
     device_s *dev = getDeviceIndex(i);
@@ -626,6 +644,7 @@ void handleMediaInterrupt() {
     }
     if (dev->type == CD_TYPE) {
       LOG_SATA("%d is a CD (%d)\n", i, dev->state);
+      wakeUpCDRom(dev->dev_addr, dev->lun);
       set3doCDReady(dev->dev_addr, dev->state == MOUNTED);
       set3doDriveMounted(dev->dev_addr, dev->state  == MOUNTED);
     }
@@ -1009,7 +1028,7 @@ what's your reply to 0x83?
       {
         uint32_t entry = 0;
         entry = ((data_in[0]&0xFF)<<24)|((data_in[1]&0xFF)<<16)|((data_in[2]&0xFF)<<8)|((data_in[3]&0xFF)<<0);
-        LOG_SATA("CHANGE_TOC %d\n", entry);
+        LOG_SATA("CHANGE_TOC %d on %d\n", entry&0xFFFFFF, entry>>24);
         handleTocChange(entry);
       }
       buffer[index++] = status;
@@ -1102,7 +1121,7 @@ what's your reply to 0x83?
         if (flags != TOC_FLAG_INVALID) {
           uint32_t toc_id = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
           uint32_t name_length = (TOC[i++]<<24)|(TOC[i++]<<16)|(TOC[i++]<<8)|(TOC[i++]<<0);
-          LOG_SATA(".flags :0x%x, .toc_id: %d, .name_length: %d, .name: %s\n", flags, toc_id, name_length, &TOC[i]);
+          LOG_SATA(".flags :0x%x, .toc_id: %d %d, .name_length: %d, .name: %s\n", flags, toc_id>>24, getTocEntry(toc_id), name_length, &TOC[i]);
           i += name_length;
         } else break;
       }

@@ -37,7 +37,8 @@ typedef struct {
   bool hasOnlyAudio;
   track_s tracks[100];
   uint8_t offset;
-  device_s *dev;
+  uint8_t dev_addr;
+  uint8_t lun;
   dir_t *curDir;
   char *curPath;
 } cd_s;
