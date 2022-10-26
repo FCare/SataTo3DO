@@ -160,6 +160,7 @@ static void check_load(uint8_t dev_addr) {
 
 
 static void check_subq(uint8_t dev_addr) {
+  if (currentImage.dev == NULL) return;
   if (subqRequired) {
     bool found = false;
     usb_cmd_on_going = true;
@@ -233,6 +234,7 @@ void addToPlaylist(int entry, bool *valid, bool *added) {
 }
 
 static void check_block(uint8_t dev_addr) {
+  if (currentImage.dev == NULL) return;
   if (blockRequired) {
     usb_cmd_on_going = true;
 
@@ -335,6 +337,7 @@ static bool isA3doImage(char * path) {
 }
 
 static bool LoadfromCue(char *filePath) {
+  if (currentImage.dev == NULL) return;
   FIL myFile;
   FRESULT fr;
   bool  valid = false;
@@ -497,6 +500,7 @@ static bool LoadfromCue(char *filePath) {
 }
 
 static bool ValidateInfofromCue(FILINFO *fileInfo) {
+  if (currentImage.dev == NULL) return;
   FIL myFile;
   UINT i = strlen(fileInfo->fname);
   FRESULT fr;
@@ -629,6 +633,7 @@ static bool ValidateInfofromCue(FILINFO *fileInfo) {
 }
 
 static bool ValidateInfofromIso(FILINFO *fileInfo) {
+  if (currentImage.dev == NULL) return;
   FIL myFile;
   UINT i = strlen(fileInfo->fname);
   FRESULT fr;
@@ -642,6 +647,7 @@ static bool ValidateInfofromIso(FILINFO *fileInfo) {
 }
 
 static bool LoadfromIso(char *filePath) {
+  if (currentImage.dev == NULL) return false;
   FIL myFile;
   FILINFO fileInfo;
   FRESULT fr;
@@ -696,6 +702,7 @@ static bool LoadfromIso(char *filePath) {
 
 
 static bool extractBootImage(FILINFO *fileInfo, char* curPath, uint8_t dev_addr) {
+  if (currentImage.dev != NULL) return;
   FIL myFile;
   UINT i = strlen(fileInfo->fname);
   FRESULT fr;
@@ -706,17 +713,17 @@ static bool extractBootImage(FILINFO *fileInfo, char* curPath, uint8_t dev_addr)
     free(newPath);
     return false;
   }
+  if (((fileInfo->fsize % 2352)!=0) && ((fileInfo->fsize % 2048)!=0)){
+    LOG_SATA("File is %d bytes length\n", fileInfo->fsize);
+    free(newPath);
+    return false;
+  }
   if ((fileInfo->fsize % 2352)==0) {
     currentImage.block_size = 2352;
     currentImage.offset = 16;
   } else if ((fileInfo->fsize % 2048)==0) {
     currentImage.block_size = 2048;
     currentImage.offset = 0;
-  } else {
-    //Bad format
-    LOG_SATA("File is %d bytes length\n", fileInfo->fsize);
-    free(newPath);
-    return false;
   }
 
   if (curBinPath != NULL) free(curBinPath);
@@ -836,7 +843,7 @@ bool loadPlaylistEntry(uint8_t dev_addr) {
       last_pos = 0;
       dev->state = MOUNTED;
       usb_cmd_on_going = false;
-      currentImage.dev = dev;
+      // currentImage.dev = dev;
       set3doCDReady(currentImage.dev->dev_addr, true);
       set3doDriveMounted(currentImage.dev->dev_addr, true);
       ret = true;
@@ -876,25 +883,29 @@ bool loadBootIso(uint8_t dev_addr) {
         ret = true;
       } else {
         LOG_SATA("Can not open the Game!\n");
+        if (currentImage.curDir != NULL) free(currentImage.curDir);
+        if (currentImage.curPath != NULL) free(currentImage.curPath);
+        currentImage.curDir = NULL;
+        currentImage.curPath = NULL;
+        currentImage.dev = NULL;
       }
     }
     else {
+      currentImage.curDir = NULL;
+      currentImage.curPath = NULL;
+      currentImage.dev = NULL;
       LOG_SATA("Can not extract on %s\n", curPath);
     }
   }
   if (!ret) {
     free(curDir);
     free(curPath);
-    if (currentImage.curDir != NULL) free(currentImage.curDir);
-    if (currentImage.curPath != NULL) free(currentImage.curPath);
-    currentImage.curDir = NULL;
-    currentImage.curPath = NULL;
   }
   return ret;
 }
 
 static bool handleBootImage(uint8_t dev_addr) {
-  if ((currentImage.dev !=NULL) && (currentImage.dev->type == MSC_TYPE) && (currentImage.dev->dev_addr != dev_addr)) {
+  if ((currentImage.dev != NULL) && (currentImage.dev->type == MSC_TYPE) && (currentImage.dev->dev_addr != dev_addr)) {
     LOG_SATA("Boot image is on %d\n", currentImage.dev->dev_addr);
     return true;
   }
@@ -941,6 +952,7 @@ int getTocLevel(void) {
 }
 
 void setTocLevel(int index) {
+  if (currentImage.dev == NULL) return;
   FRESULT res;
   FILINFO fileInfo;
   int curDirNb = 0;
@@ -1021,6 +1033,7 @@ void setTocLevel(int index) {
 }
 
 static bool getNextValidToc(FILINFO *fileInfo) {
+  if (currentImage.dev == NULL) return;
   FRESULT res;
   res = f_readdir(&currentImage.curDir->dir, fileInfo);                   /* Read a directory item */
   if (res != FR_OK) fileInfo->fname[0] = 0;  /* Break on error or end of dir */
@@ -1036,6 +1049,7 @@ static bool getNextValidToc(FILINFO *fileInfo) {
 }
 
 bool seekTocTo(int index) {
+  if (currentImage.dev == NULL) return;
   FILINFO fileInfo;
   int i = 0;
   f_closedir(&currentImage.curDir->dir);
@@ -1085,6 +1099,7 @@ bool getNextTOCEntry(toc_entry* toc) {
 }
 
 void requestOpenFile(char* name, uint16_t name_length, bool write) {
+  if (currentImage.dev == NULL) return;
   uint16_t length = name_length + strlen(currentImage.curPath) + 1;
   if (curFilePath != NULL) free(curFilePath);
   curFilePath = malloc(length);

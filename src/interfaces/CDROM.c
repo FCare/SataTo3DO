@@ -106,6 +106,7 @@ static bool speedChange = false;
 static uint16_t CDSpeed;
 
 static void check_block(uint8_t dev_addr) {
+  if (currentImage.dev == NULL) return;
   if (blockRequired  && (dev_addr == currentImage.dev->dev_addr)) {
     usb_cmd_on_going = true;
     blockRequired = false;
@@ -124,6 +125,7 @@ static void check_block(uint8_t dev_addr) {
 }
 
 static bool check_subq(uint8_t dev_addr) {
+  if (currentImage.dev == NULL) return;
   if (subqRequired && (dev_addr == currentImage.dev->dev_addr)) {
     usb_cmd_on_going = true;
     subqRequired = false;
@@ -136,6 +138,7 @@ static bool check_subq(uint8_t dev_addr) {
 }
 
 static void check_speed(uint8_t dev_addr) {
+  if (currentImage.dev == NULL) return;
   if (speedChange && (dev_addr == currentImage.dev->dev_addr)) {
     usb_cmd_on_going = true;
     speedChange = false;

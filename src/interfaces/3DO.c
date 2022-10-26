@@ -194,6 +194,7 @@ void wait_out_of_reset() {
 }
 
 void set3doCDReady(uint8_t dev_addr, bool on) {
+  if (currentImage.dev == NULL) return;
   if (on && (currentImage.dev->dev_addr == dev_addr)) {
     errorOnDisk = 0;
     switch(currentImage.format) {
@@ -222,6 +223,7 @@ void set3doCDReady(uint8_t dev_addr, bool on) {
 
 void set3doDriveMounted(uint8_t dev_addr, bool on) {
   device_s *dev = getDevice(dev_addr);
+  if (currentImage.dev == NULL) return;
   if ((currentImage.dev->dev_addr == dev_addr) && (!on)) {
     LOG_SATA("set3doDriveMounted %d\n", on);
     if (currentImage.curDir != NULL) free(currentImage.curDir);
