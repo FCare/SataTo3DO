@@ -202,6 +202,7 @@ void set3doCDReady(uint8_t dev_addr, bool on) {
           LOG_SATA("Audio CD detected\n");
         else
           LOG_SATA("Data CD detected\n");
+          //Need to check if compatible 3DO game
         break;
       case 0x20:
         LOG_SATA("Photo-CD detected\n");
@@ -213,6 +214,8 @@ void set3doCDReady(uint8_t dev_addr, bool on) {
     status = TRAY_IN | DISC_RDY | DISC_PRESENT | SPINNING;
     errorCode = 0;
     status &= ~CHECK_ERROR;
+  } else {
+    if (on) LOG_SATA("Current Image is on dev addr %x but CD is %x\n", currentImage.dev->dev_addr, dev_addr);
   }
 
 }
@@ -421,7 +424,7 @@ void getTocFull(int index, int nb) {
     int nbCD = 0;
     for (int i=0; i<max; i++) {
       device_s *dev = getDeviceIndex(i);
-      if (dev->dev_addr != 0xFF) {
+      if (dev->useable) {
         toc_entry *te = malloc(sizeof(toc_entry));
         memset(te, 0x0, sizeof(toc_entry));
         char name[20];
@@ -620,6 +623,7 @@ void handleMediaInterrupt() {
       LOG_SATA("Loaded on %d\n", i);
     }
     if (dev->type == CD_TYPE) {
+      LOG_SATA("%d is a CD (%d)\n", i, dev->state);
       set3doCDReady(dev->dev_addr, dev->state == MOUNTED);
       set3doDriveMounted(dev->dev_addr, dev->state  == MOUNTED);
     }

@@ -262,31 +262,37 @@ bool CDROM_Inquiry(uint8_t dev_addr, uint8_t lun) {
   }
   dev->tray_open = false; //In case of slot-in consider it has started and tray is closed
   dev->useable = true;
-  // Get capacity of device
-  currentImage.hasOnlyAudio = true;
-  currentImage.nb_block = tuh_msc_get_block_count(dev_addr, lun);
-  currentImage.block_size = tuh_msc_get_block_size(dev_addr, lun);
-  currentImage.block_size_read = currentImage.block_size;
 
-  int lba = currentImage.nb_block + 150;
-  currentImage.msf[0] = lba/(60*75);
-  lba %= 60*75;
-  currentImage.msf[1] = lba / 75;
-  currentImage.msf[2] = lba % 75;
 
-  //Assume type is CD-DA or CD-ROM always
-  currentImage.format = 0x0; /*00 CD-DA or CD-ROM / 10 CD-I / 20 XA */
+  if (currentImage.dev == NULL) {
+    LOG_SATA("Use the CD as potential source\n");
+    currentImage.dev = dev;
+    // Get capacity of device
+    currentImage.hasOnlyAudio = true;
+    currentImage.nb_block = tuh_msc_get_block_count(dev_addr, lun);
+    currentImage.block_size = tuh_msc_get_block_size(dev_addr, lun);
+    currentImage.block_size_read = currentImage.block_size;
 
-  LOG_SATA("Disk Size: %lu MB\r\n", currentImage.nb_block / ((1024*1024)/currentImage.block_size));
-  LOG_SATA("Block Count = %lu, Block Size: %lu\r\n", currentImage.nb_block, currentImage.block_size);
-  LOG_SATA("Disc duration is %02d:%02d:%02d\n", currentImage.msf[0], currentImage.msf[1], currentImage.msf[2]);
+    int lba = currentImage.nb_block + 150;
+    currentImage.msf[0] = lba/(60*75);
+    lba %= 60*75;
+    currentImage.msf[1] = lba / 75;
+    currentImage.msf[2] = lba % 75;
 
-  if (!tuh_msc_read_toc(dev_addr, lun, readBuffer, 1, 0, 0, read_toc_light_complete_cb)) {
+    //Assume type is CD-DA or CD-ROM always
+    currentImage.format = 0x0; /*00 CD-DA or CD-ROM / 10 CD-I / 20 XA */
+
+    LOG_SATA("Disk Size: %lu MB\r\n", currentImage.nb_block / ((1024*1024)/currentImage.block_size));
+    LOG_SATA("Block Count = %lu, Block Size: %lu\r\n", currentImage.nb_block, currentImage.block_size);
+    LOG_SATA("Disc duration is %02d:%02d:%02d\n", currentImage.msf[0], currentImage.msf[1], currentImage.msf[2]);
+
+    if (!tuh_msc_read_toc(dev_addr, lun, readBuffer, 1, 0, 0, read_toc_light_complete_cb)) {
       LOG_SATA("Got error with toc read\n");
       return false;
-  }
+    }
 
-  setCDSpeed(706); //4x speed
+    setCDSpeed(706); //4x speed
+  }
   return true;
 }
 
