@@ -219,15 +219,37 @@ static bool read_toc_light_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, m
   return true;
 }
 
-static int ido = 0;
+static uint8_t capabilties_buffer[256];
+
+static bool mode_sense_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw)
+{
+  device_s *dev = getDevice(dev_addr);
+
+  dev->canBeLoaded = true;
+  dev->canBeEjected = true;
+
+  uint16_t length = (capabilties_buffer[0]<<8)+capabilties_buffer[1];
+  uint16_t block_descriptor_length = (capabilties_buffer[6]<<8)+capabilties_buffer[7]+8;
+  if ((length < 128) && (block_descriptor_length<length)) {
+    if ((capabilties_buffer[block_descriptor_length + 6] >> 5) == 0) dev->canBeLoaded = false;
+    if ((capabilties_buffer[block_descriptor_length + 6] & 0x8) == 0) dev->canBeEjected = false;
+    LOG_SATA("Can Load %d, Can Eject %d %d\n", dev->canBeLoaded, dev->canBeEjected);
+    dev->state = CONFIGURED;
+    return true;
+  }
+}
+
+static bool CheckCDCapabilities(uint8_t dev_addr) {
+  device_s *dev = getDevice(dev_addr);
+
+  return tuh_msc_mode_sense(dev_addr, dev->lun, 0x2A, 0x0, 0x0, 128, &capabilties_buffer[0], mode_sense_complete_cb);
+}
+
 void CDROM_ready(uint8_t dev_addr, bool ready) {
   //Get capabilities in sync
   device_s *dev = getDevice(dev_addr);
   if (dev->state == ENUMERATED) {
-    if (CheckCDCapabilities(dev_addr, &dev->canBeLoaded, &dev->canBeEjected)){
-      LOG_SATA("Can Load %d, Can Eject %d %d\n", dev->canBeLoaded, dev->canBeEjected, ido++);
-      dev->state = CONFIGURED;
-    }
+    CheckCDCapabilities(dev_addr);
   }
   if (!ready) return;
 }
