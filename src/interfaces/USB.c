@@ -282,23 +282,6 @@ void tuh_msc_mount_cb(uint8_t dev_addr)
   if (dev->type == MSC_TYPE) {
     MSC_Inquiry(dev_addr, dev->lun);
   }
-  if (ret) {
-    //disc is detected
-    // Be sure we have the configuration done
-    usb_cmd_on_going = false;
-    if (dev->state < CONFIGURED) {
-      if (dev->type == CD_TYPE)
-      CDROM_ready(dev_addr, true);
-    }
-    // If we still do not have the configuration, consider we are configured
-    if (dev->state < CONFIGURED) {
-      //capabilities does not work, consider eject is possible for CD
-      dev->canBeLoaded = (dev->type == CD_TYPE);
-      dev->canBeEjected = (dev->type == CD_TYPE);
-      dev->state = CONFIGURED;
-      checkForMedia(dev_addr, dev->lun);
-    }
-  }
 }
 
 void tuh_msc_umount_cb(uint8_t dev_addr)

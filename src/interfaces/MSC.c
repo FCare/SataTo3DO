@@ -695,14 +695,14 @@ static bool LoadfromIso(char *filePath) {
 }
 
 
-static bool extractBootImage(FILINFO *fileInfo) {
+static bool extractBootImage(FILINFO *fileInfo, char* curPath, uint8_t dev_addr) {
   FIL myFile;
   UINT i = strlen(fileInfo->fname);
   FRESULT fr;
-  char *newPath = malloc(strlen(currentImage.curPath)+i+2);
-  sprintf(&newPath[0], "%s\\%s", currentImage.curPath, fileInfo->fname);
+  char *newPath = malloc(strlen(curPath)+i+2);
+  sprintf(&newPath[0], "%s\\%s", curPath, fileInfo->fname);
   if (!isA3doImage(newPath)) {
-    LOG_SATA("Is not a 3DO image %s\n", currentImage.curPath);
+    LOG_SATA("Is not a 3DO image %s\n", curPath);
     free(newPath);
     return false;
   }
@@ -720,6 +720,13 @@ static bool extractBootImage(FILINFO *fileInfo) {
   }
 
   if (curBinPath != NULL) free(curBinPath);
+
+  device_s *dev = getDevice(dev_addr);
+  currentImage.dev = dev;
+
+  if (currentImage.curPath != NULL) free(currentImage.curPath);
+  currentImage.curPath = curPath;
+
   curBinPath = newPath;
 
   currentImage.block_size_read = currentImage.block_size;
@@ -854,18 +861,14 @@ bool loadBootIso(uint8_t dev_addr) {
     //report error. Boot iso is not found
     LOG_SATA("Error on %s\n", curPath);
   } else {
-    device_s *dev = getDevice(dev_addr);
-    currentImage.dev = dev;
-    if (currentImage.curDir != NULL) free(currentImage.curDir);
-    if (currentImage.curPath != NULL) free(currentImage.curPath);
-    currentImage.curDir = curDir;
-    currentImage.curPath = curPath;
     //load boot.iso
-    if (extractBootImage(&fileInfo)) {
+    if (extractBootImage(&fileInfo, curPath, dev_addr)) {
+      if (currentImage.curDir != NULL) free(currentImage.curDir);
+      currentImage.curDir = curDir;
       // memcpy(&currentImage, &allImage[selected_img].info, sizeof(cd_s));
       if (f_open(&curBinFile, curBinPath, FA_READ) == FR_OK) {
         last_pos = 0;
-        dev->state = MOUNTED;
+        currentImage.dev->state = MOUNTED;
         usb_cmd_on_going = false;
         LOG_SATA("Boot iso path %s\n", currentImage.curPath);
         set3doCDReady(currentImage.dev->dev_addr, true);
@@ -891,6 +894,10 @@ bool loadBootIso(uint8_t dev_addr) {
 }
 
 static bool handleBootImage(uint8_t dev_addr) {
+  if ((currentImage.dev !=NULL) && (currentImage.dev->type == MSC_TYPE) && (currentImage.dev->dev_addr != dev_addr)) {
+    LOG_SATA("Boot image is on %d\n", currentImage.dev->dev_addr);
+    return true;
+  }
   LOG_SATA("Handle Boot image %d (%d)\n", onMountMode, playlist.nb_entries);
   if (playlist.nb_entries != 0) {
     LOG_SATA("Handle playlist\n");
