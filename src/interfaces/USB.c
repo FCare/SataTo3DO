@@ -225,17 +225,14 @@ bool write_is_ready(bool *success) {
   return fileCmdRequired == DONE;
 }
 
-bool USBDriveEject(uint8_t dev_addr, bool eject, bool *interrupt) {
+bool USBDriveEject(uint8_t dev_addr, bool eject) {
   device_s *dev = getDevice(dev_addr);
   if (dev->type == CD_TYPE) {
-    // *interrupt = !eject;
-    *interrupt = true;
     dev->state = EJECTING;
     LOG_SATA("usb not enumerated\n");
     return true;
   }
   if (dev->type == MSC_TYPE) {
-    *interrupt = true;
     return true;
   }
   return false;

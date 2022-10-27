@@ -65,6 +65,11 @@ static FSIZE_t last_pos = 0;
 
 static FIL file;
 
+static int current_toc = 0x00000000;
+static int current_toc_level = 0;
+// static int current_toc_index = 0xFF;
+static int current_toc_offset = 0;
+
 int getPlaylistEntries() {
   return playlist.nb_entries;
 }
@@ -74,6 +79,11 @@ void updatePlayListEntries() {
     if (playlist.current_entry == playlist.nb_entries) {
       LOG_SATA("Playlist done - clearing\n");
       clearPlaylist();
+      current_toc_level = 0;
+      current_toc = 0x00000000;
+      f_closedir(&currentImage.curDir->dir);
+      if (currentImage.curPath != NULL) free(currentImage.curPath);
+      currentImage.curPath = NULL;
     }
   }
 }
@@ -946,7 +956,6 @@ bool loadBootIso(uint8_t dev_addr) {
 
 static bool handleBootImage(uint8_t dev_addr) {
   device_s *dev = getDevice(currentImage.dev_addr);
-  onBootIso = false;
   if ((currentImage.dev_addr != 0xFF) && (dev->type == MSC_TYPE) && (currentImage.dev_addr != dev_addr)) {
     LOG_SATA("Boot image is on %d\n", currentImage.dev_addr);
     return true;
@@ -985,11 +994,6 @@ bool MSC_Inquiry(uint8_t dev_addr, uint8_t lun) {
   mediaInterrupt();
 }
 
-static int current_toc = 0x00000000;
-static int current_toc_level = 0;
-// static int current_toc_index = 0xFF;
-static int current_toc_offset = 0;
-
 int getTocLevel(void) {
   return current_toc_level;
 }
@@ -1011,13 +1015,14 @@ void setTocLevel(int index) {
   FRESULT res;
   FILINFO fileInfo;
   int curDirNb = 0;
-  LOG_SATA("current_toc %d (%d) vs %d (%d)\n", getTocEntry(current_toc), current_toc>>24, getTocEntry(index), index>>24);
+  LOG_SATA("current_toc %d (%d) vs %d (%d) current_toc_level %d\n", getTocEntry(current_toc), current_toc>>24, getTocEntry(index), index>>24, current_toc_level);
 
   if (isUp(index)) {
     LOG_SATA("Set Toc Level start %s level %d\n", currentImage.curPath, current_toc_level);
-    if (current_toc_level <= 1) {
+    if (current_toc_level == 1) {
       f_closedir(&currentImage.curDir->dir);
       free(currentImage.curPath);
+      currentImage.curPath = NULL;
       current_toc_level = 0;
       // current_toc_index = 0xFF;
       current_toc = 0x00000000;
@@ -1038,16 +1043,19 @@ void setTocLevel(int index) {
         current_toc_level -= 1;
       }
     }
+    LOG_SATA("New current_toc_level %d\n", current_toc_level);
     return;
   }
   if (current_toc != index) {
     //need to change the current TOC level
     //Get required Toc Entry
-    if (((getTocEntry(current_toc)) == 0) && (current_toc_level == 0)){
+    if (((getTocEntry(index)) == 0) && (current_toc_level == 0)){
+      int idx = (index>>24)-1;
+      if (idx < 0) idx = 0;
       currentImage.curDir = getNewDir();
       currentImage.curPath = (char*)malloc(20 * sizeof(char));
       // current_toc_index = index>>24;
-      snprintf(currentImage.curPath, 20, "%d://", (index>>24)-1);
+      snprintf(currentImage.curPath, 20, "%d://", idx);
       res = f_opendir(&currentImage.curDir->dir, currentImage.curPath);
       current_toc_offset = 0;
       current_toc_level++;
@@ -1066,6 +1074,7 @@ void setTocLevel(int index) {
         if (fileInfo.fname[0] == 0) {
           //Should raise en arror. Shall never happen
           LOG_SATA("!!! WTF not found\n");
+          LOG_SATA("New current_toc_level %d\n", current_toc_level);
           return; //End of file list
         }
       }
@@ -1082,11 +1091,13 @@ void setTocLevel(int index) {
         current_toc_offset = 0;
         current_toc_level++;
       } else {
+        LOG_SATA("New current_toc_level %d\n", current_toc_level);
         LOG_SATA("!!! WTF not a directory\n");
       }
     }
     current_toc = index;
   }
+  LOG_SATA("New current_toc_level %d\n", current_toc_level);
 }
 
 static bool getNextValidToc(FILINFO *fileInfo) {

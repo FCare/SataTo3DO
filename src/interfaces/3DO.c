@@ -24,7 +24,7 @@
 
 extern bool readBlock(uint32_t start, uint16_t nb_block, uint16_t block_size, uint8_t *buffer);
 extern bool readSubQChannel(uint8_t *buffer);
-extern bool USBDriveEject(uint8_t dev_addr, bool eject, bool *interrupt);
+extern bool USBDriveEject(uint8_t dev_addr, bool eject);
 extern bool block_is_ready();
 extern bool cmd_is_ready(bool *success);
 extern bool isAudioBlock(uint32_t start);
@@ -170,34 +170,50 @@ static bool canHandleReset = false;
 
 static int pitch = 0;
 
-volatile bool interrupt = false;
-
 static uint8_t errorCode = POWER_OR_RESET_OCCURED;
 static uint8_t status = TRAY_IN | CHECK_ERROR | DISC_RDY;
 
 void close_tray(bool close) {
   LOG_SATA("Ask to eject %d\n", close);
-  bool interrupt = false;
   device_s *dev = NULL;
+  bool has_usb = false;
+  bool has_cd = false;
+  for (int i = 0; i<CFG_TUH_DEVICE_MAX; i++) {
+    device_s *curdev = getDeviceIndex(i);
+    if (curdev->type == MSC_TYPE) {
+      has_usb = true;
+    }
+    if (curdev->type == CD_TYPE) {
+      has_cd = true;
+    }
+  }
+  //By default eject currentImage device
   if (currentImage.dev_addr != 0xFF) dev = getDevice(currentImage.dev_addr);
-  if (onBootIso) {
+  if (dev != NULL) {
+    //If the currentImage device is a cd but we have usb key, do not eject it
+    if ((dev->type == CD_TYPE) && (has_usb))
+      dev = NULL;
+  }
+  //But In case we are on Boot menu and there is a CD, eject the CD
+  if (onBootIso & has_cd) {
     //on Boot menu, if there is a CDROM, try to eject it.
     for (int i = 0; i<CFG_TUH_DEVICE_MAX; i++) {
       device_s *curdev = getDeviceIndex(i);
       if (curdev->type == CD_TYPE) {
-        USBDriveEject(curdev->dev_addr, !close, &interrupt);
-        return;
+        dev = curdev;
+        break;
       }
     }
   }
   if (dev != NULL) {
-    if (!USBDriveEject(dev->dev_addr, !close, &interrupt)) {
+    if (!USBDriveEject(dev->dev_addr, !close)) {
       LOG_SATA("Can not eject/inject\n");
       return;
     }
   }
   // status &= ~TRAY_IN;
-  mediaInterrupt();
+  if (!onBootIso)
+    mediaInterrupt();
 }
 
 void wait_out_of_reset() {
@@ -638,6 +654,7 @@ void handleMediaInterrupt() {
     pio_sm_get(pio0, sm_read);
   }
   LOG_SATA("Look for BootImage\n");
+  onBootIso = false;
   if (getPlaylistEntries() == 0) {
     currentImage.dev_addr = 0xFF;
     currentImage.lun = 0x0;
