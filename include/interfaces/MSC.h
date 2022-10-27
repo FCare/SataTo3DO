@@ -39,6 +39,7 @@ extern void requestBootImage();
 extern void waitForLoad();
 
 extern int getPlaylistEntries();
+extern void updatePlayListEntries();
 
 
 #endif

@@ -180,6 +180,7 @@ void tuh_msc_ready_cb(uint8_t dev_addr, bool ready) {
     CDROM_ready(dev_addr, ready);
   if (!ready) {
     checkForMedia(dev_addr, dev->lun);
+    //Voir pour executer le check for media tous les 300 ms au plus rapide
   }
 }
 

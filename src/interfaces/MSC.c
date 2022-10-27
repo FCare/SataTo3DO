@@ -44,6 +44,8 @@ extern uint8_t *buffer_subq;
 
 extern volatile bool usb_result;
 
+bool onBootIso = false;
+
 
 #define SELECTED_IMAGE 22
 
@@ -65,6 +67,15 @@ static FIL file;
 
 int getPlaylistEntries() {
   return playlist.nb_entries;
+}
+
+void updatePlayListEntries() {
+  if (getPlaylistEntries() != 0) {
+    if (playlist.current_entry == playlist.nb_entries) {
+      LOG_SATA("Playlist done - clearing\n");
+      clearPlaylist();
+    }
+  }
 }
 
 bool MSC_Host_loop(device_s *dev)
@@ -873,10 +884,7 @@ bool loadPlaylistEntry(uint8_t dev_addr) {
   }
   if (loaded) {
     playlist.current_entry++;
-    if (playlist.current_entry == playlist.nb_entries) {
-      LOG_SATA("Playlist done - clearing\n");
-      clearPlaylist();
-    }
+    updatePlayListEntries();
   }
 
   return ret;
@@ -905,6 +913,7 @@ bool loadBootIso(uint8_t dev_addr) {
       if (f_open(&curBinFile, curBinPath, FA_READ) == FR_OK) {
         last_pos = 0;
         dev->state = MOUNTED;
+        onBootIso = true;
         usb_cmd_on_going = false;
         LOG_SATA("Boot iso path %s\n", currentImage.curPath);
         set3doCDReady(currentImage.dev_addr, true);
@@ -937,6 +946,7 @@ bool loadBootIso(uint8_t dev_addr) {
 
 static bool handleBootImage(uint8_t dev_addr) {
   device_s *dev = getDevice(currentImage.dev_addr);
+  onBootIso = false;
   if ((currentImage.dev_addr != 0xFF) && (dev->type == MSC_TYPE) && (currentImage.dev_addr != dev_addr)) {
     LOG_SATA("Boot image is on %d\n", currentImage.dev_addr);
     return true;

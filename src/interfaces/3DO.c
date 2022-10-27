@@ -24,12 +24,15 @@
 
 extern bool readBlock(uint32_t start, uint16_t nb_block, uint16_t block_size, uint8_t *buffer);
 extern bool readSubQChannel(uint8_t *buffer);
-extern bool USBDriveEject(bool eject, bool *interrupt);
+extern bool USBDriveEject(uint8_t dev_addr, bool eject, bool *interrupt);
 extern bool block_is_ready();
 extern bool cmd_is_ready(bool *success);
 extern bool isAudioBlock(uint32_t start);
+extern void wakeUpCDRom(uint8_t dev_addr, uint8_t lun);
 
 extern void USB_reset(void);
+
+extern bool onBootIso;
 
 #define GET_BUS(A) (((A)>>CDD0)&0xFF)
 
@@ -175,9 +178,23 @@ static uint8_t status = TRAY_IN | CHECK_ERROR | DISC_RDY;
 void close_tray(bool close) {
   LOG_SATA("Ask to eject %d\n", close);
   bool interrupt = false;
-  if (!USBDriveEject(!close, &interrupt)) {
-    LOG_SATA("Can not eject/inject\n");
-    return;
+  device_s *dev = NULL;
+  if (currentImage.dev_addr != 0xFF) dev = getDevice(currentImage.dev_addr);
+  if (onBootIso) {
+    //on Boot menu, if there is a CDROM, try to eject it.
+    for (int i = 0; i<CFG_TUH_DEVICE_MAX; i++) {
+      device_s *curdev = getDeviceIndex(i);
+      if (curdev->type == CD_TYPE) {
+        USBDriveEject(curdev->dev_addr, !close, &interrupt);
+        return;
+      }
+    }
+  }
+  if (dev != NULL) {
+    if (!USBDriveEject(dev->dev_addr, !close, &interrupt)) {
+      LOG_SATA("Can not eject/inject\n");
+      return;
+    }
   }
   // status &= ~TRAY_IN;
   mediaInterrupt();
@@ -393,6 +410,8 @@ static void handleTocChange(int index) {
 
 char* getPathForTOC(int entry) {
   if (getTocEntry(entry)==0x0) {
+    device_s *dev = getDevice(entry>>24);
+    if (!dev->useable) return NULL;
     char* result = malloc(7);
     snprintf(result, 7, "%d://", (entry>>24)-1);
     return result;
@@ -431,43 +450,42 @@ void getTocFull(int index, int nb) {
     int nbCD = 0;
     for (int i=0; i<max; i++) {
       device_s *dev = getDeviceIndex(i);
-      if (dev->useable) {
-        toc_entry *te = malloc(sizeof(toc_entry));
-        memset(te, 0x0, sizeof(toc_entry));
-        char name[20];
-        if (dev->type == CD_TYPE) {
-          snprintf(name, 20, "CD %d", nbCD);
-          nbCD++;
-        }
-        if (dev->type == MSC_TYPE) {
-          snprintf(name, 20, "USB %d", nbUsb);
-          nbUsb++;
-        }
-        te->flags = (dev->isFatFs)?TOC_FLAG_DIR:TOC_FLAG_FILE;
-        te->toc_id = dev->dev_addr<<24;
-        te->name_length = strlen(name) + 1;
-        te->name = malloc(te->name_length);
-        snprintf(te->name, te->name_length, "%s", name);
-        te->name[te->name_length-1] = 0;
-
-        TOC[toclen++]=te->flags>>24;
-        TOC[toclen++]=te->flags>>16;
-        TOC[toclen++]=te->flags>>8;
-        TOC[toclen++]=te->flags&0xff;
-        TOC[toclen++]=te->toc_id>>24;
-        TOC[toclen++]=te->toc_id>>16;
-        TOC[toclen++]=te->toc_id>>8;
-        TOC[toclen++]=te->toc_id&0xff;
-        TOC[toclen++]=te->name_length>>24;
-        TOC[toclen++]=te->name_length>>16;
-        TOC[toclen++]=te->name_length>>8;
-        TOC[toclen++]=te->name_length&0xff;
-        for(uint32_t t=0;t<te->name_length;t++) {
-          TOC[toclen++]=te->name[t];
-        }
-        if (te->name != NULL) free(te->name);
-        free(te);
+      toc_entry *te = malloc(sizeof(toc_entry));
+      memset(te, 0x0, sizeof(toc_entry));
+      char name[20];
+      if (dev->type == CD_TYPE) {
+        snprintf(name, 20, "CD %d", nbCD);
+        nbCD++;
       }
+      if (dev->type == MSC_TYPE) {
+        snprintf(name, 20, "USB %d", nbUsb);
+        nbUsb++;
+      }
+      te->flags = (dev->isFatFs)?TOC_FLAG_DIR:TOC_FLAG_FILE;
+      te->toc_id = dev->dev_addr<<24;
+      te->name_length = strlen(name) + 1;
+      te->name = malloc(te->name_length);
+      snprintf(te->name, te->name_length, "%s", name);
+      te->name[te->name_length-1] = 0;
+
+      TOC[toclen++]=te->flags>>24;
+      TOC[toclen++]=te->flags>>16;
+      TOC[toclen++]=te->flags>>8;
+      TOC[toclen++]=te->flags&0xff;
+      TOC[toclen++]=te->toc_id>>24;
+      TOC[toclen++]=te->toc_id>>16;
+      TOC[toclen++]=te->toc_id>>8;
+      TOC[toclen++]=te->toc_id&0xff;
+      TOC[toclen++]=te->name_length>>24;
+      TOC[toclen++]=te->name_length>>16;
+      TOC[toclen++]=te->name_length>>8;
+      TOC[toclen++]=te->name_length&0xff;
+      for(uint32_t t=0;t<te->name_length;t++) {
+        TOC[toclen++]=te->name[t];
+      }
+      if (te->name != NULL) free(te->name);
+      free(te);
+
     }
   } else {
     if (!seekTocTo(index)) {
