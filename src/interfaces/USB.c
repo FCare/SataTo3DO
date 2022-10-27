@@ -174,12 +174,23 @@ static bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_
   return true;
 }
 
+int64_t alarm_callback(alarm_id_t id, void *user_data) {
+    device_s *dev = (device_s *)user_data;
+    checkForMedia(dev->dev_addr, dev->lun);
+    // Can return a value here in us to fire in the future
+    return 0;
+}
+
+void tryCheckForMedia(device_s *dev) {
+  add_alarm_in_ms(500, alarm_callback, (void*)dev, false);
+}
+
 void tuh_msc_ready_cb(uint8_t dev_addr, bool ready) {
   device_s *dev=getDevice(dev_addr);
   if (dev->type == CD_TYPE)
     CDROM_ready(dev_addr, ready);
   if (!ready) {
-    checkForMedia(dev_addr, dev->lun);
+    tryCheckForMedia(dev);
     //Voir pour executer le check for media tous les 300 ms au plus rapide
   }
 }

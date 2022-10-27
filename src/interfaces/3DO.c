@@ -450,41 +450,43 @@ void getTocFull(int index, int nb) {
     int nbCD = 0;
     for (int i=0; i<max; i++) {
       device_s *dev = getDeviceIndex(i);
-      toc_entry *te = malloc(sizeof(toc_entry));
-      memset(te, 0x0, sizeof(toc_entry));
-      char name[20];
-      if (dev->type == CD_TYPE) {
-        snprintf(name, 20, "CD %d", nbCD);
-        nbCD++;
-      }
-      if (dev->type == MSC_TYPE) {
-        snprintf(name, 20, "USB %d", nbUsb);
-        nbUsb++;
-      }
-      te->flags = (dev->isFatFs)?TOC_FLAG_DIR:TOC_FLAG_FILE;
-      te->toc_id = dev->dev_addr<<24;
-      te->name_length = strlen(name) + 1;
-      te->name = malloc(te->name_length);
-      snprintf(te->name, te->name_length, "%s", name);
-      te->name[te->name_length-1] = 0;
+      if (dev->type != UNKNOWN_TYPE) {
+        toc_entry *te = malloc(sizeof(toc_entry));
+        memset(te, 0x0, sizeof(toc_entry));
+        char name[20];
+        if (dev->type == CD_TYPE) {
+          snprintf(name, 20, "CD %d", nbCD);
+          nbCD++;
+        }
+        if (dev->type == MSC_TYPE) {
+          snprintf(name, 20, "USB %d", nbUsb);
+          nbUsb++;
+        }
+        te->flags = (dev->isFatFs)?TOC_FLAG_DIR:TOC_FLAG_FILE;
+        te->toc_id = dev->dev_addr<<24;
+        te->name_length = strlen(name) + 1;
+        te->name = malloc(te->name_length);
+        snprintf(te->name, te->name_length, "%s", name);
+        te->name[te->name_length-1] = 0;
 
-      TOC[toclen++]=te->flags>>24;
-      TOC[toclen++]=te->flags>>16;
-      TOC[toclen++]=te->flags>>8;
-      TOC[toclen++]=te->flags&0xff;
-      TOC[toclen++]=te->toc_id>>24;
-      TOC[toclen++]=te->toc_id>>16;
-      TOC[toclen++]=te->toc_id>>8;
-      TOC[toclen++]=te->toc_id&0xff;
-      TOC[toclen++]=te->name_length>>24;
-      TOC[toclen++]=te->name_length>>16;
-      TOC[toclen++]=te->name_length>>8;
-      TOC[toclen++]=te->name_length&0xff;
-      for(uint32_t t=0;t<te->name_length;t++) {
-        TOC[toclen++]=te->name[t];
+        TOC[toclen++]=te->flags>>24;
+        TOC[toclen++]=te->flags>>16;
+        TOC[toclen++]=te->flags>>8;
+        TOC[toclen++]=te->flags&0xff;
+        TOC[toclen++]=te->toc_id>>24;
+        TOC[toclen++]=te->toc_id>>16;
+        TOC[toclen++]=te->toc_id>>8;
+        TOC[toclen++]=te->toc_id&0xff;
+        TOC[toclen++]=te->name_length>>24;
+        TOC[toclen++]=te->name_length>>16;
+        TOC[toclen++]=te->name_length>>8;
+        TOC[toclen++]=te->name_length&0xff;
+        for(uint32_t t=0;t<te->name_length;t++) {
+          TOC[toclen++]=te->name[t];
+        }
+        if (te->name != NULL) free(te->name);
+        free(te);
       }
-      if (te->name != NULL) free(te->name);
-      free(te);
 
     }
   } else {
