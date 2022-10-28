@@ -7,6 +7,8 @@
 
 uint8_t usb_state = 0;
 
+static int deviceCnt = 0;
+
 bool usb_cmd_on_going = false;
 
 static scsi_inquiry_resp_t inquiry_resp;
@@ -49,6 +51,7 @@ void USB_Host_init() {
     currentImage.dev_addr = 0xFF;
     currentImage.lun = 0x0;
     usb_cmd_on_going = false;
+    deviceCnt = 0;
 #ifdef USE_TRACE
     stdio_init_all();
 #endif
@@ -164,9 +167,11 @@ static bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_
   dev->lun = cbw->lun;
 
   if (inquiry_resp.peripheral_device_type == 0x5) {
+    deviceCnt++;
     dev->type = CD_TYPE;
   }
   if (inquiry_resp.peripheral_device_type == 0x0) {
+    deviceCnt++;
     dev->type = MSC_TYPE;
   }
   checkForMedia(dev_addr, dev->lun);
@@ -229,13 +234,16 @@ bool USBDriveEject(uint8_t dev_addr, bool eject) {
   device_s *dev = getDevice(dev_addr);
   if (dev->type == CD_TYPE) {
     dev->state = EJECTING;
-    LOG_SATA("usb not enumerated\n");
     return true;
   }
   if (dev->type == MSC_TYPE) {
     return true;
   }
   return false;
+}
+
+int getDeviceCount(void) {
+  return deviceCnt;
 }
 
 
@@ -322,6 +330,7 @@ void tuh_msc_umount_cb(uint8_t dev_addr)
   dev->canBeEjected = false;
   dev->state = DETACHED;
   dev->type = UNKNOWN_TYPE;
+  deviceCnt--;
   mediaInterrupt();
 }
 

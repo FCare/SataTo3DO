@@ -115,11 +115,15 @@ static void check_block(uint8_t dev_addr) {
     if (!is_audio) {
       if ( !tuh_msc_read10_sync(currentImage.dev_addr, currentImage.lun, buffer_Block, start_Block, nb_block_Block, read_complete_cb)) {
         LOG_SATA("Got error with block read\n");
+        currentImage.dev_addr = 0xFF;
+        mediaInterrupt();
         return;
       }
     } else {
       if ( !tuh_msc_read_cd(currentImage.dev_addr, currentImage.lun, buffer_Block, start_Block, nb_block_Block, has_subQ, read_complete_cb)) {
         LOG_SATA("Got error with block read\n");
+        currentImage.dev_addr = 0xFF;
+        mediaInterrupt();
         return;
       }
     }
@@ -132,6 +136,8 @@ static bool check_subq(uint8_t dev_addr) {
     subqRequired = false;
     if (!tuh_msc_read_sub_channel(currentImage.dev_addr, currentImage.lun, buffer_subq, read_complete_cb)) {
       LOG_SATA("Got error with sub Channel read\n");
+      currentImage.dev_addr = 0xFF;
+      mediaInterrupt();
       return false;
     }
   }

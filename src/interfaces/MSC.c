@@ -1016,10 +1016,9 @@ void setTocLevel(int index) {
   FILINFO fileInfo;
   int curDirNb = 0;
   LOG_SATA("current_toc %d (%d) vs %d (%d) current_toc_level %d\n", getTocEntry(current_toc), current_toc>>24, getTocEntry(index), index>>24, current_toc_level);
-
   if (isUp(index)) {
     LOG_SATA("Set Toc Level start %s level %d\n", currentImage.curPath, current_toc_level);
-    if (current_toc_level == 1) {
+    if ((current_toc_level == 1)&&(getDeviceCount()>1)) {
       f_closedir(&currentImage.curDir->dir);
       free(currentImage.curPath);
       currentImage.curPath = NULL;
@@ -1096,6 +1095,10 @@ void setTocLevel(int index) {
       }
     }
     current_toc = index;
+  } else {
+    if ((getTocLevel() == 0) && (getDeviceCount()<=1)) {
+      current_toc = (currentImage.dev_addr)<<24;
+    }
   }
   LOG_SATA("New current_toc_level %d\n", current_toc_level);
 }

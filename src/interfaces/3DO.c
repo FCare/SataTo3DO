@@ -174,7 +174,6 @@ static uint8_t errorCode = POWER_OR_RESET_OCCURED;
 static uint8_t status = TRAY_IN | CHECK_ERROR | DISC_RDY;
 
 void close_tray(bool close) {
-  LOG_SATA("Ask to eject %d\n", close);
   device_s *dev = NULL;
   bool has_usb = false;
   bool has_cd = false;
@@ -187,8 +186,19 @@ void close_tray(bool close) {
       has_cd = true;
     }
   }
+  LOG_SATA("Ask to eject %d has_sub %d has_cd %d\n", close, has_usb, has_cd);
   //By default eject currentImage device
   if (currentImage.dev_addr != 0xFF) dev = getDevice(currentImage.dev_addr);
+  //In case there is no currentImage, we might have an invalid CD
+  if ((currentImage.dev_addr == 0xFF) && (has_cd)) {
+    for (int i = 0; i<CFG_TUH_DEVICE_MAX; i++) {
+      device_s *curdev = getDeviceIndex(i);
+      if (curdev->type == CD_TYPE) {
+        dev = curdev;
+        break;
+      }
+    }
+  }
   if (dev != NULL) {
     //If the currentImage device is a cd but we have usb key, do not eject it
     if ((dev->type == CD_TYPE) && (has_usb))
@@ -206,6 +216,7 @@ void close_tray(bool close) {
     }
   }
   if (dev != NULL) {
+    LOG_SATA("request Eject on dev %d, type %s\n", dev->dev_addr, (dev->type==CD_TYPE)?"CD":"USB");
     if (!USBDriveEject(dev->dev_addr, !close)) {
       LOG_SATA("Can not eject/inject\n");
       return;
@@ -458,8 +469,7 @@ void getTocFull(int index, int nb) {
   int id = 0;
   bool ended = false;
   memset(TOC,0xff,sizeof(TOC));
-
-  if (getTocLevel() == 0) {
+  if ((getTocLevel() == 0) && (getDeviceCount()>1)) {
     int max = CFG_TUH_DEVICE_MAX;
     if (nb<CFG_TUH_DEVICE_MAX) max = nb;
     int nbUsb = 0;
