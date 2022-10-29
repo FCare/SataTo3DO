@@ -19,8 +19,11 @@
 #define DATA_OUT 1
 
 #include "read.pio.h"
-
+#ifdef HW_HS_FC
+#include "write_hs_fc.pio.h"
+#else
 #include "write.pio.h"
+#endif
 
 extern bool readBlock(uint32_t start, uint16_t nb_block, uint16_t block_size, uint8_t *buffer);
 extern bool readSubQChannel(uint8_t *buffer);

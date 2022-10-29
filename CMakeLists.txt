@@ -42,7 +42,6 @@ FATFs/ffunicode.c
 )
 
 pico_generate_pio_header(SataTo3DO ${CMAKE_CURRENT_LIST_DIR}/src/interfaces/read.pio)
-pico_generate_pio_header(SataTo3DO ${CMAKE_CURRENT_LIST_DIR}/src/interfaces/write.pio)
 
 # enable usb output, disable uart output
 # pico_enable_stdio_usb(SataTo3DO 1)
@@ -50,6 +49,14 @@ option(USE_DEBUG "Use the UART RX/TX" OFF)
 if (USE_DEBUG)
   add_definitions("-DUSE_TRACE")
   pico_enable_stdio_uart(SataTo3DO 1)
+endif()
+
+option(USE_HS_FC "Use the HW version with a hw bug on CTRL3 pin" OFF)
+if (USE_HS_FC)
+add_definitions("-DHW_HS_FC")
+pico_generate_pio_header(SataTo3DO ${CMAKE_CURRENT_LIST_DIR}/src/interfaces/write_hs_fc.pio)
+else()
+pico_generate_pio_header(SataTo3DO ${CMAKE_CURRENT_LIST_DIR}/src/interfaces/write.pio)
 endif()
 
 # create map/bin/hex/uf2 file etc.
