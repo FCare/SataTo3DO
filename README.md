@@ -6,8 +6,8 @@ For the BOM:
 - 1 RP2040 moudle: RP2040-plus from waveshare: https://www.waveshare.com/wiki/RP2040-Plus
 - 6 level bi-directional shifter: https://fr.aliexpress.com/item/32890488553.html
 - 1 Octal bus tranceiver 74HC245N in DIP format
-- 1 2x6 connector 1.5mm
-- 1 2x15 connector 1.5mm
+- 1 2x6 connector 1.5mm (to be populated on POWER_1)
+- 1 2x15 connector 1.5mm (to be populated on CDROM)
 
 All other parts are not required. If you want to debug code, you can add a header on uart port and plug a UAR to USB adapter (I am using minicom on linux to see thr traces)
 
