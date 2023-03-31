@@ -1,1 +1,6 @@
 build
+CMakeFiles
+CMakeCache.txt
+elf2uf2
+pioasm
+generated
