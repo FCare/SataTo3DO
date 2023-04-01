@@ -8,9 +8,9 @@ For the BOM:
 - 1x RP2040 module: RP2040-Plus from WaveShare: https://www.waveshare.com/wiki/RP2040-Plus
 - 6x bi-directional level shifter modules: https://fr.aliexpress.com/item/32890488553.html
 - 1x Octal bus tranceiver 74HC245N in DIP format
-- 1x 2x6 connector 1.5mm (to be populated on POWER_1)
-- 1x 2x15 connector 1.5mm (to be populated on CDROM)
-
+- 1x 2x6 connector 1.25mm (to be populated on POWER_1)
+- 1x 2x15 connector 1.25mm (to be populated on CDROM)
+Connectors can be found on aliexpress (https://m.fr.aliexpress.com/item/1005002262284714.html?spm=a2g0n.order_detail.order_detail_item.3.22c37d5606bASo&gatewayAdapt=glo2fra)
 All other parts are not required to be populated. If you want to debug code, you can add a header on the UART port, and connect a UART to USB adapter (I am using minicom on Linux as a serial console to see the traces.)
 
 Regarding connectors, take care to order the right one depending your 3DO's cable.
