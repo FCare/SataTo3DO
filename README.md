@@ -1,4 +1,4 @@
-Ķ# SataTo3DO
+# SataTo3DO
 The goal of this project is to replace the physical drive of my NTSC FZ-1 with a low-cost ODE.
 
 ## Hardware Construction
