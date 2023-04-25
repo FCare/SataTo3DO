@@ -15,8 +15,13 @@
 
 #define DATA_BUS_MASK (0xFF<<CDD0)
 
+#ifdef DIR_IN_HI
+#define DATA_IN 1
+#define DATA_OUT 0
+#else
 #define DATA_IN 0
 #define DATA_OUT 1
+#endif
 
 #include "read.pio.h"
 #ifdef HW_HS_FC
