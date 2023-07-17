@@ -23,6 +23,16 @@ Note that `tinyusb` and `pico-sdk` come from git submodules. They can be cloned 
 ```bash
 git submodule update --init --recursive
 ```
+In order to build:
+```bash
+sudo apt install cmake gcc-arm-none-eabi build-essential
+mkdir build
+cd build
+cmake ../
+make -j8
+```
+Per default, the setup is done for waveshare_rp2040_plus_4mb.
+For a 16mb, you need to edit the CMakeLists.txt file and change the PICO_BOARD to waveshare_rp2040_plus_16mb
 
 Otherwise, cmake will raise errors that it cannot find the necessary include files.
 
