@@ -48,3 +48,12 @@ Copy your desired game ISOs to the USB disk.
 There is no sorting algorithm supported, so the order displayed on the 3DO will follow the FAT entry order. This means the first game you will transfer to the USB stick will be the first one in the list.
 
 Do not hesitate to contribute with MR.
+
+## License
+
+Files specific to this project is licensed under the [MIT
+License](LICENSE).
+
+Dependencies have their own licenses:
+* tinyusb: https://github.com/hathach/tinyusb (MIT)
+* pico-sdk: https://github.com/raspberrypi/pico-sdk (BSD 3 Clause)
