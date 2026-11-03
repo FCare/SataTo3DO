@@ -59,6 +59,7 @@ void USB_Host_init() {
 }
 
 static bool check_eject(device_s *dev);
+static void check_media_retry(device_s *dev);
 
 static bool Default_Host_loop(device_s *dev) {
 #if CFG_TUH_MSC
@@ -85,6 +86,7 @@ void USB_Host_loop()
   for (int i =0; i<CFG_TUH_DEVICE_MAX; i++) {
     device_s *dev = getDeviceIndex(i);
     if (dev->dev_addr == 0xFF) continue;
+    check_media_retry(dev);
     switch (dev->type) {
       case CD_TYPE:
         ret = CDROM_Host_loop(dev);
@@ -179,15 +181,27 @@ static bool inquiry_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_
   return true;
 }
 
-int64_t alarm_callback(alarm_id_t id, void *user_data) {
-    device_s *dev = (device_s *)user_data;
-    checkForMedia(dev->dev_addr, dev->lun);
-    // Can return a value here in us to fire in the future
-    return 0;
-}
+static bool media_retry_pending[CFG_TUH_DEVICE_MAX] = {0};
+static absolute_time_t media_retry_at[CFG_TUH_DEVICE_MAX];
+static uint8_t sense_buf[18];
 
 void tryCheckForMedia(device_s *dev) {
-  add_alarm_in_ms(500, alarm_callback, (void*)dev, false);
+  int idx = dev - devices;
+  media_retry_at[idx] = make_timeout_time_ms(500);
+  media_retry_pending[idx] = true;
+}
+
+static void check_media_retry(device_s *dev) {
+  int idx = dev - devices;
+  if (!media_retry_pending[idx]) return;
+  if (absolute_time_diff_us(get_absolute_time(), media_retry_at[idx]) > 0) return;
+  media_retry_pending[idx] = false;
+  if (!checkForMedia(dev->dev_addr, dev->lun)) tryCheckForMedia(dev);
+}
+
+static bool sense_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw) {
+  tryCheckForMedia(getDevice(dev_addr));
+  return true;
 }
 
 void tuh_msc_ready_cb(uint8_t dev_addr, bool ready) {
@@ -195,7 +209,9 @@ void tuh_msc_ready_cb(uint8_t dev_addr, bool ready) {
   if (dev->type == CD_TYPE)
     CDROM_ready(dev_addr, ready);
   if (!ready) {
-    tryCheckForMedia(dev);
+    // Clear any pending sense (e.g. UNIT ATTENTION after power-up) before retrying
+    if (!tuh_msc_request_sense(dev_addr, dev->lun, sense_buf, sense_complete_cb))
+      tryCheckForMedia(dev);
     //Voir pour executer le check for media tous les 300 ms au plus rapide
   }
 }
@@ -305,6 +321,7 @@ void tuh_msc_mount_cb(uint8_t dev_addr)
 void tuh_msc_umount_cb(uint8_t dev_addr)
 {
   device_s *dev = getDevice(dev_addr);
+  media_retry_pending[dev - devices] = false;
 
   LOG_SATA("A USB MassStorage device is unmounted\r\n");
 
