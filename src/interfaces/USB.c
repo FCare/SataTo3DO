@@ -209,7 +209,7 @@ void tuh_msc_ready_cb(uint8_t dev_addr, bool ready) {
   if (dev->type == CD_TYPE)
     CDROM_ready(dev_addr, ready);
   if (!ready) {
-    // Clear any pending sense (e.g. UNIT ATTENTION after power-up) before retrying
+    //Lire le sense en attente (ex: UNIT ATTENTION apres la mise sous tension) avant de reessayer
     if (!tuh_msc_request_sense(dev_addr, dev->lun, sense_buf, sense_complete_cb))
       tryCheckForMedia(dev);
     //Voir pour executer le check for media tous les 300 ms au plus rapide
