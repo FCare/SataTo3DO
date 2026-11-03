@@ -5,7 +5,7 @@ extern bool CDROM_Host_loop(device_s *dev);
 
 extern bool CDROM_Inquiry(uint8_t dev_addr, uint8_t lun);
 
-extern bool CDROM_ExecuteEject();
+extern bool CDROM_ExecuteEject(uint8_t dev_addr);
 
 extern void CDROM_ready(uint8_t dev_addr, bool ready);
 
