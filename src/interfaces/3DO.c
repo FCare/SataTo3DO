@@ -235,11 +235,19 @@ void close_tray(bool close) {
     mediaInterrupt();
 }
 
+// Time CDRST was released, recorded by the CDRST interrupt. The handshake below
+// is timed from it, so it stays on time when the end of the reset is noticed late.
+static volatile uint32_t resetReleaseUs = 0;
+
 void wait_out_of_reset() {
-  while( !gpio_get(CDRST)) {
-    gpio_put(CDMDCHG, 1); //Under reset
+  if (!gpio_get(CDRST)) {
+    while( !gpio_get(CDRST)) {
+      gpio_put(CDMDCHG, 1); //Under reset
+    }
+    resetReleaseUs = time_us_32();
   }
-  sleep_ms(500);
+  uint32_t sinceRelease = time_us_32() - resetReleaseUs;
+  if (sinceRelease < 500000) sleep_us(500000 - sinceRelease);
   gpio_put(CDMDCHG, 0); //Under reset
   sleep_ms(100);
   gpio_put(CDMDCHG, 1); //Under reset
@@ -371,9 +379,12 @@ static void stopTransfers(void) {
 }
 
 static void cdrst_irq(uint gpio, uint32_t events) {
-  if ((gpio != CDRST) || !(events & GPIO_IRQ_EDGE_FALL)) return;
-  resetDuringTransfer = true;
-  stopTransfers();
+  if (gpio != CDRST) return;
+  if (events & GPIO_IRQ_EDGE_FALL) {
+    resetDuringTransfer = true;
+    stopTransfers();
+  }
+  if (events & GPIO_IRQ_EDGE_RISE) resetReleaseUs = time_us_32();
 }
 
 void sendAnswer(uint8_t *buffer, uint32_t nbWord, uint8_t access) {
@@ -1379,7 +1390,7 @@ void core1_entry() {
     setupDMA(i);
   }
 
-  if (!use_cdrom) gpio_set_irq_enabled_with_callback(CDRST, GPIO_IRQ_EDGE_FALL, true, &cdrst_irq);
+  if (!use_cdrom) gpio_set_irq_enabled_with_callback(CDRST, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &cdrst_irq);
 
   LOG_SATA("Ready\n");
   while (1){
@@ -1400,7 +1411,7 @@ void core1_entry() {
       }
       if (gpio_get(CDEN)) {
         LOG_SATA("CD is not enabled\n");
-        while(gpio_get(CDEN));
+        while(gpio_get(CDEN) && gpio_get(CDRST) && !resetDuringTransfer);
         LOG_SATA("CD is enabled now\n");
       }
 
