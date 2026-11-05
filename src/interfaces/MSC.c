@@ -699,7 +699,9 @@ static bool LoadfromIso(char *filePath) {
   LOG_SATA("Load Game %s\n", filePath);
 
   if (curBinPath != NULL) free(curBinPath);
-  curBinPath = filePath;
+  //filePath belongs to the playlist, which frees it when cleared: keep a copy
+  curBinPath = malloc(strlen(filePath)+1);
+  strcpy(curBinPath, filePath);
 
   currentImage.block_size_read = currentImage.block_size;
 
