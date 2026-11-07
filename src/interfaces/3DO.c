@@ -235,11 +235,19 @@ void close_tray(bool close) {
     mediaInterrupt();
 }
 
+// Time CDRST was released, recorded by the CDRST interrupt. The handshake below
+// is timed from it, so it stays on time when the end of the reset is noticed late.
+static volatile uint32_t resetReleaseUs = 0;
+
 void wait_out_of_reset() {
-  while( !gpio_get(CDRST)) {
-    gpio_put(CDMDCHG, 1); //Under reset
+  if (!gpio_get(CDRST)) {
+    while( !gpio_get(CDRST)) {
+      gpio_put(CDMDCHG, 1); //Under reset
+    }
+    resetReleaseUs = time_us_32();
   }
-  sleep_ms(500);
+  uint32_t sinceRelease = time_us_32() - resetReleaseUs;
+  if (sinceRelease < 500000) sleep_us(500000 - sinceRelease);
   gpio_put(CDMDCHG, 0); //Under reset
   sleep_ms(100);
   gpio_put(CDMDCHG, 1); //Under reset
@@ -354,12 +362,40 @@ void startDMA(uint8_t access, uint8_t *buffer, uint32_t nbWord) {
   dma_channel_transfer_from_buffer_now(channel[access], buffer, nbWord);
 }
 
+// When the 3DO resets the drive in the middle of a transfer, it stops clocking
+// data and the send loops below would wait forever. Rather than adding checks to
+// those timing-critical loops, the CDRST interrupt stops the transfer so that
+// every loop condition becomes false: DMA idle, TX FIFO empty, PIO back at its
+// entry point (stalled on "pull block").
+static volatile bool resetDuringTransfer = false;
+
+static void stopTransfers(void) {
+  for (int i = 0; i < CHAN_MAX; i++) {
+    dma_channel_abort(channel[i]);
+    pio_sm_set_enabled(pio0, sm[i], false);
+    pio_sm_clear_fifos(pio0, sm[i]);
+    pio_sm_exec(pio0, sm[i], instr_jmp[i]);
+  }
+}
+
+static void cdrst_irq(uint gpio, uint32_t events) {
+  if (gpio != CDRST) return;
+  if (events & GPIO_IRQ_EDGE_FALL) {
+    resetDuringTransfer = true;
+    stopTransfers();
+  }
+  if (events & GPIO_IRQ_EDGE_RISE) resetReleaseUs = time_us_32();
+}
+
 void sendAnswer(uint8_t *buffer, uint32_t nbWord, uint8_t access) {
+  if (resetDuringTransfer) return;
   restartPio(access);
   startDMA(access, buffer, nbWord);
   pio_sm_set_consecutive_pindirs(pio0, sm[access], CDD0, 8, true);
   setDataDir(DATA_OUT); //Output data
   gpio_put(CDSTEN + access, 0x0);
+  // A reset that came in before the DMA started found nothing to stop
+  if (resetDuringTransfer) stopTransfers();
 
   dma_channel_wait_for_finish_blocking(access);
   while(!pio_sm_is_tx_fifo_empty(pio0, sm[access]));
@@ -374,6 +410,7 @@ bool sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
   bool statusStarted = false;
   bool interrupted = false;
   absolute_time_t a,b,c,d,e, s = get_absolute_time();
+  if (resetDuringTransfer) return false;
   bool lastCDEN = gpio_get(CDEN);
   if (trace) a= get_absolute_time();
   restartPio(CHAN_WRITE_DATA);
@@ -387,6 +424,8 @@ bool sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
   if (trace) e= get_absolute_time();
   absolute_time_t start = get_absolute_time();
   bool canBeInterrupted = false;
+  // A reset that came in before the DMA started found nothing to stop
+  if (resetDuringTransfer) stopTransfers();
 
   if (trace)
     LOG_SATA("a %lld, b %lld, c %lld, d %lld, e %lld\n", absolute_time_diff_us(s,a), absolute_time_diff_us(a,b), absolute_time_diff_us(b,c), absolute_time_diff_us(c,d), absolute_time_diff_us(d,e));
@@ -428,6 +467,12 @@ bool sendAnswerStatusMixed(uint8_t *buffer, uint32_t nbWord, uint8_t *buffer_sta
   while (pio_sm_get_pc(pio0, sm[CHAN_WRITE_DATA]) != sm_offset[CHAN_WRITE_DATA]);
   gpio_put(CDDTEN, 0x1);
   setDataDir(DATA_IN); //Input data
+  if (resetDuringTransfer) {
+    gpio_put(CDSTEN, 0x1);
+    pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_DATA], CDD0, 8, false);
+    pio_sm_set_enabled(pio0, sm[CHAN_WRITE_DATA], false);
+    return false;
+  }
   if (!interrupted && last) sendAnswer(buffer_status, nbStatus, CHAN_WRITE_STATUS);
   else pio_sm_set_consecutive_pindirs(pio0, sm[CHAN_WRITE_DATA], CDD0, 8, false);
   pio_sm_set_enabled(pio0, sm[CHAN_WRITE_DATA], false);
@@ -603,9 +648,9 @@ void sendData(int startlba, int nb_block, bool trace) {
 
     readBlock(startlba, 1, currentImage.block_size_read, &buffer[0]);
     if (trace) b= get_absolute_time();
-    while(!block_is_ready() && !errorOnDisk && gpio_get(CDRST));
+    while(!block_is_ready() && !errorOnDisk && !resetDuringTransfer && gpio_get(CDRST));
 
-    if (!gpio_get(CDRST)) return;
+    if (resetDuringTransfer || !gpio_get(CDRST)) return;
     if (isAudioBlock(startlba)) {
       int timeForASecond = (990 + pitch) * 1000 + reste;  //Shall be 1s but cd drive is a bit slower than expected
       int correctedDelay = timeForASecond/75;
@@ -1345,6 +1390,8 @@ void core1_entry() {
     setupDMA(i);
   }
 
+  if (!use_cdrom) gpio_set_irq_enabled_with_callback(CDRST, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &cdrst_irq);
+
   LOG_SATA("Ready\n");
   while (1){
 
@@ -1352,7 +1399,9 @@ void core1_entry() {
       gpio_put(CDRST_SNIFF, gpio_get(CDRST));
       gpio_put(CDEN_SNIFF, gpio_get(CDEN));
     } else {
-      if (!gpio_get(CDRST)) {
+      if (!gpio_get(CDRST) || resetDuringTransfer) {
+        if (gpio_get(CDRST)) LOG_SATA("Reset pulse caught by interrupt\n");
+        resetDuringTransfer = false;
         LOG_SATA("Got a reset Status!\n");
         reset_occured = true;
         wait_out_of_reset();
@@ -1362,7 +1411,7 @@ void core1_entry() {
       }
       if (gpio_get(CDEN)) {
         LOG_SATA("CD is not enabled\n");
-        while(gpio_get(CDEN));
+        while(gpio_get(CDEN) && gpio_get(CDRST) && !resetDuringTransfer);
         LOG_SATA("CD is enabled now\n");
       }
 
