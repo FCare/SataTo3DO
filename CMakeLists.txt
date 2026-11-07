@@ -16,6 +16,9 @@ set(CFG_TUSB_CONFIG_FILE "include/tusb_config.h")
 
 project(SataTo3DO)
 
+# Newer GCC defaults to C23, where "void f()" means no arguments
+set(CMAKE_C_STANDARD 11)
+
 add_definitions(-DPICO_TINYUSB_PATH=${PICO_TINYUSB_PATH})
 
 pico_sdk_init()
@@ -71,3 +74,19 @@ endif()
 pico_add_extra_outputs(SataTo3DO)
 
 target_link_libraries(SataTo3DO PRIVATE pico_stdlib hardware_pio hardware_dma pico_multicore tinyusb_board tinyusb_host)
+
+# GCC 14+ turns some old warnings into errors, and the tinyusb fork still
+# triggers them. Keep them as warnings for the tinyusb sources only.
+include(CheckCCompilerFlag)
+# Bare-metal toolchain cannot link a test program, only compile it
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+set(TINYUSB_RELAXED_FLAGS "")
+foreach(warning implicit-function-declaration incompatible-pointer-types return-mismatch int-conversion)
+  string(MAKE_C_IDENTIFIER "HAS_W_${warning}" flag_var)
+  check_c_compiler_flag("-W${warning}" ${flag_var})
+  if (${flag_var})
+    list(APPEND TINYUSB_RELAXED_FLAGS "-Wno-error=${warning}")
+  endif()
+endforeach()
+file(GLOB_RECURSE TINYUSB_SOURCES ${PICO_TINYUSB_PATH}/src/*.c)
+set_source_files_properties(${TINYUSB_SOURCES} PROPERTIES COMPILE_OPTIONS "${TINYUSB_RELAXED_FLAGS}")

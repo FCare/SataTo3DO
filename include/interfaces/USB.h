@@ -57,7 +57,11 @@ extern void USB_reset(void);
 
 extern device_s* getDevice(uint8_t dev_addr);
 extern device_s* getDeviceIndex(uint8_t idx);
+extern int getDeviceCount(void);
 
 extern bool read_complete_cb(uint8_t dev_addr, msc_cbw_t const* cbw, msc_csw_t const* csw);
+
+// Defined in the tinyusb fork (msc_host.c) but not declared in its header
+extern bool tuh_msc_read10_sync(uint8_t dev_addr, uint8_t lun, void * buffer, uint32_t lba, uint16_t block_count, tuh_msc_complete_cb_t complete_cb);
 
 #endif

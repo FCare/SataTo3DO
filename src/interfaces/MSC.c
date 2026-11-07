@@ -366,7 +366,7 @@ static bool isA3doImage(char * path) {
 }
 
 static bool LoadfromCue(char *filePath) {
-  if (currentImage.dev_addr == 0xFF) return;
+  if (currentImage.dev_addr == 0xFF) return false;
   FIL myFile;
   FRESULT fr;
   bool  valid = false;
@@ -529,7 +529,7 @@ static bool LoadfromCue(char *filePath) {
 }
 
 static bool ValidateInfofromCue(FILINFO *fileInfo) {
-  if (currentImage.dev_addr == 0xFF) return;
+  if (currentImage.dev_addr == 0xFF) return false;
   FIL myFile;
   UINT i = strlen(fileInfo->fname);
   FRESULT fr;
@@ -662,7 +662,7 @@ static bool ValidateInfofromCue(FILINFO *fileInfo) {
 }
 
 static bool ValidateInfofromIso(FILINFO *fileInfo) {
-  if (currentImage.dev_addr == 0xFF) return;
+  if (currentImage.dev_addr == 0xFF) return false;
   FIL myFile;
   UINT i = strlen(fileInfo->fname);
   FRESULT fr;
@@ -731,7 +731,7 @@ static bool LoadfromIso(char *filePath) {
 
 
 static bool extractBootImage(FILINFO *fileInfo, char* curPath, uint8_t dev_addr) {
-  if (currentImage.dev_addr != 0xFF) return;
+  if (currentImage.dev_addr != 0xFF) return false;
   FIL myFile;
   UINT i = strlen(fileInfo->fname);
   FRESULT fr;
@@ -1104,7 +1104,7 @@ void setTocLevel(int index) {
 }
 
 static bool getNextValidToc(FILINFO *fileInfo) {
-  if (currentImage.dev_addr == 0xFF) return;
+  if (currentImage.dev_addr == 0xFF) return false;
   FRESULT res;
   res = f_readdir(&currentImage.curDir->dir, fileInfo);                   /* Read a directory item */
   if (res != FR_OK) fileInfo->fname[0] = 0;  /* Break on error or end of dir */
@@ -1120,7 +1120,7 @@ static bool getNextValidToc(FILINFO *fileInfo) {
 }
 
 bool seekTocTo(int index) {
-  if (currentImage.dev_addr == 0xFF) return;
+  if (currentImage.dev_addr == 0xFF) return false;
   FILINFO fileInfo;
   int i = 0;
   f_closedir(&currentImage.curDir->dir);
